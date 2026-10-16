@@ -326,11 +326,13 @@ def verify(apk_out, orig_apk, build_tools):
         else:
             log("    unchanged: %s" % name)
 
-    # Compare the game's payload by CONTENT, not by path: apktool renames some
-    # resource folders (res/drawable-hdpi-v4 -> res/drawable-hdpi), so a
-    # name-based diff reports false alarms.  Everything the game ships must
-    # still be there, byte for byte, apart from classes.dex (which we extend)
-    # and the signature files (which we replace).
+    # Compare the game's payload by CONTENT, not by path, and only for the
+    # parts that must never change: assets/ and lib/ (the engine, the game
+    # metadata, the native libraries).  Resources are deliberately excluded --
+    # apktool/aapt2 decode and re-encode them (and sometimes rename folders such
+    # as res/drawable-hdpi-v4 -> res/drawable-hdpi), so their bytes legitimately
+    # differ while their content does not.  AndroidManifest.xml is excluded as
+    # well: we modify it on purpose.
     def payload(path):
         out = {}
         with zipfile.ZipFile(path) as z:
@@ -338,8 +340,11 @@ def verify(apk_out, orig_apk, build_tools):
                 n = zi.filename
                 if n.endswith("/"):
                     continue
-                if n == "classes.dex" or (n.startswith("META-INF/") and n.upper().endswith(
-                        (".SF", ".RSA", ".DSA", ".EC", ".MF"))):
+                if n == "classes.dex" or n == "AndroidManifest.xml" or n == "resources.arsc":
+                    continue
+                if n.startswith("res/") or n.startswith("META-INF/"):
+                    continue
+                if not (n.startswith("assets/") or n.startswith("lib/") or "/" not in n):
                     continue
                 out.setdefault(hashlib.sha256(z.read(n)).hexdigest(), []).append(n)
         return out
@@ -350,15 +355,11 @@ def verify(apk_out, orig_apk, build_tools):
     if lost:
         problems.append("%d payload files are missing from the rebuild: %s"
                         % (len(lost), lost[:5]))
-    renamed = 0
-    for h, names in out_payload.items():
-        if h in orig_payload and sorted(names) != sorted(orig_payload[h]):
-            renamed += 1
-    log("    payload: original %d files, rebuilt %d files, %d renamed by apktool"
-        % (sum(len(v) for v in orig_payload.values()),
-           sum(len(v) for v in out_payload.values()), renamed))
+    n_orig = sum(len(v) for v in orig_payload.values())
+    n_out = sum(len(v) for v in out_payload.values())
+    log("    payload (assets/ + lib/): original %d files, rebuilt %d files" % (n_orig, n_out))
     if not lost:
-        log("    every original file is present in the rebuild (identical content)")
+        log("    every engine/asset file is byte-identical in the rebuild")
     with zipfile.ZipFile(orig_apk) as zo, zipfile.ZipFile(apk_out) as zz:
         log("    entries: original %d, rebuilt %d" % (len(zo.namelist()), len(zz.namelist())))
 
