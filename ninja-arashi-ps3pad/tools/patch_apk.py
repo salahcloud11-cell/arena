@@ -108,19 +108,20 @@ def patch_manifest(tree):
     log("== 2. adding the Application class to AndroidManifest.xml")
     path = os.path.join(tree, "AndroidManifest.xml")
     xml = open(path, encoding="utf-8").read()
-    if 'android:name="com.ps3mod.PS3App"' in xml:
+    marker = 'com.ps3mod.PS3App'
+    injected = 'android:name="' + marker + '"'
+    if injected in xml:
         log("    already present")
         return
-    old = re.search(r"<application\b[^>]*?android:name=\"([^\"]*)\"", xml)
+    old = re.search('<application[^>]*?android:name="([^"]*)"', xml)
     if old:
         log("    NOTE: original Application class was %s (replaced)" % old.group(1))
-        xml = re.sub(r"(<application\b[^>]*?)\s+android:name=\"[^\"]*\"", r"\1", xml, count=1)
-    new, n = re.subn(r"(<application\b)", r"\1 android:name=\"com.ps3mod.PS3App\"",
-                     xml, count=1)
+        xml = re.sub('<application[^>]*?\\s+android:name="[^"]*"', '<application', xml, count=1)
+    new, n = re.subn('<application', '<application ' + injected, xml, count=1)
     if not n:
         raise SystemExit("could not find the <application> tag")
     open(path, "w", encoding="utf-8").write(new)
-    log("    android:name=\"com.ps3mod.PS3App\" injected")
+    log("    " + injected + " injected")
 
 
 def jdk_tool(java, name):
@@ -228,6 +229,19 @@ def count_dex_methods(path):
     return struct.unpack_from("<I", head, 88)[0]
 
 
+def strip_old_signature(tree):
+    log("== 5b. removing the game's old JAR signature")
+    meta = os.path.join(tree, "META-INF")
+    removed = []
+    if os.path.isdir(meta):
+        for name in sorted(os.listdir(meta)):
+            upper = name.upper()
+            if upper.endswith((".SF", ".RSA", ".DSA", ".EC")) or upper == "MANIFEST.MF":
+                os.remove(os.path.join(meta, name))
+                removed.append(name)
+    log("    removed: %s" % (removed if removed else "nothing"))
+
+
 def rebuild(apktool, java, tree, unsig):
     log("== 6. rebuilding (apktool b)")
     run([java, "-Xmx3g", "-jar", apktool, "b", "-o", unsig, tree])
@@ -291,6 +305,17 @@ def verify(apk_out, orig_apk, build_tools):
             problems.append("asset changed: " + name)
         else:
             log("    unchanged: %s" % name)
+
+    with zipfile.ZipFile(orig_apk) as zo, zipfile.ZipFile(apk_out) as z:
+        orig_names = zo.namelist()
+        out_names = z.namelist()
+        log("    entries: original %d, rebuilt %d" % (len(orig_names), len(out_names)))
+        missing = [n for n in orig_names if n not in out_names
+                   and not (n.startswith("META-INF/") and n.upper().endswith(
+                       (".SF", ".RSA", ".DSA", ".EC")))]
+        if missing:
+            log("    WARNING: %d entries did not survive the rebuild: %s"
+                % (len(missing), missing[:10]))
 
     with zipfile.ZipFile(apk_out) as z:
         bad = z.testzip()
@@ -362,6 +387,7 @@ def main():
         merge_smali(tree, smali)
     unsig = os.path.join(a.work, "unsigned.apk")
     if "build" not in skip:
+        strip_old_signature(tree)
         rebuild(a.apktool, a.java, tree, unsig)
     if "sign" not in skip:
         sign(a.build_tools, a.java, a.keydir, unsig, a.out)
