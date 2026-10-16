@@ -1,0 +1,8 @@
+# scratch / generated during development
+build/
+__pycache__/
+*.pyc
+
+# the game assets are not redistributed: keep the workspace copies local
+google_drive/
+work/

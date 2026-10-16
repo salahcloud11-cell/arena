@@ -1,0 +1,51 @@
+Ninja Arashi 1.4 (com.blackpanther.ninjaarashi), Unity 2018.3 IL2CPP
+Assembly: Assembly-CSharp.dll   metadata: global-metadata.dat v24
+2948 types, 19705 methods in the metadata
+
+Type: NinjaMovementScript  (type index 2770, namespace: none)
+      fields=57  methods=96  (method records 18584..18679)
+
+The mod resolves these by name + arity at runtime through
+  il2cpp_class_get_method_from_name(class, name, 0)
+and calls them with the live instance as 'this':
+  Update                 arity=0   (method record 18586)
+  Button_Left_press      arity=0   (method record 18605)
+  Button_Left_release    arity=0   (method record 18606)
+  Button_Right_press     arity=0   (method record 18607)
+  Button_Right_release   arity=0   (method record 18608)
+  Button_Check_press     arity=0   (method record 18609)
+  Button_Check_release   arity=0   (method record 18610)
+  Button_Jump_press      arity=0   (method record 18611)
+  Button_Fi_press        arity=0   (method record 18612)
+  Button_Trans_press     arity=0   (method record 18615)
+  Button_Dash_press      arity=0   (method record 18618)
+  Button_Jump_release    arity=0   (method record 18620)
+
+Other zero-argument methods on the same type, unused by the mod but
+useful if you extend it:
+  .ctor                  (method record 18584)
+  Start                  (method record 18585)
+  FixedUpdate            (method record 18587)
+  AnBV                   (method record 18593)
+  BackToCP               (method record 18602)
+
+Record layouts this analysis relies on (verified against Unity's
+UnityEngine.Input arities and against the shipped InputManager):
+  type   104 B:  @0 nameIndex  @4 namespaceIndex  @52 methodStart  @80 fieldCount  @84 methodCount
+  method  56 B:  @0 nameIndex  @4 declaringTypeIndex  @12 parameterStart  @54 parameterCount
+
+UnityEngine.CoreModule.dll -- Input API used to read the pad:
+  UnityEngine.Input::GetAxisRaw(string), GetAxis(string), GetKey(int),
+  GetKeyDown(int), GetButton(string), GetButtonDown(string)
+
+assets/bin/Data/globalgamemanagers -- InputManager already binds the pad:
+  Horizontal -> joystick axis 0        Vertical -> joystick axis 1 (inverted)
+  Fire1 -> joystick button 0           Fire2 -> joystick button 1
+  Fire3 -> joystick button 2           Jump  -> joystick button 3
+  Submit -> joystick button 0          Cancel -> joystick button 1
+  (so no game asset has to be modified to read a controller)
+
+libil2cpp.so (arm64) exports the IL2CPP C API this mod uses, including
+il2cpp_domain_get, il2cpp_thread_attach, il2cpp_domain_get_assemblies,
+il2cpp_assembly_get_image, il2cpp_image_get_name, il2cpp_class_from_name,
+il2cpp_class_get_method_from_name, il2cpp_string_new, il2cpp_gchandle_new.
