@@ -6,7 +6,8 @@ https://github.com/salahcloud11-cell/arena/releases/download/ninja-arashi-ps3-la
 **صفحة الإصدار (فيها نفس الملف + الشرح):**
 https://github.com/salahcloud11-cell/arena/releases/tag/ninja-arashi-ps3-latest
 
-- **sha256:** `c88d3447d912a5ae9c4d5eb151cc26a95ce9aed4c482ba63a44dc848bf4715cc`
+- **sha256:** كاين فالـ release page (وفي ملف `ninja-arashi-1-4-ps3pad.apk.sha256` حدا الملف) —
+  قارنه مع الملف اللي حمّلتي. (الهاش كيتبدل فكل build حيت توقيع APK كيتبدل، والملف نفسه كيف كيف.)
 - **الدليل الكامل:** https://github.com/salahcloud11-cell/arena/blob/arena/a4fd9a7a-arena/ninja-arashi-ps3pad/PS3-CONTROLLER-GUIDE.md
 
 ## مهم
