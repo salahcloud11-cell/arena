@@ -14,13 +14,13 @@ name: Ninja Arashi PS3 controller mod
 on:
   push:
     branches: ["arena/**", "main"]
+    # docs/hash-only edits do not need a 65 MB rebuild (GitHub does not allow
+    # paths and paths-ignore together, so the docs are excluded with "!")
     paths:
       - "ninja-arashi-ps3pad/**"
       - ".github/workflows/ninja-arashi-ps3.yml"
-    # docs/hash-only changes do not need a 65 MB rebuild
-    paths-ignore:
-      - "ninja-arashi-ps3pad/**/*.md"
-      - "ninja-arashi-ps3pad/**/*.sha256"
+      - "!ninja-arashi-ps3pad/**/*.md"
+      - "!ninja-arashi-ps3pad/**/*.sha256"
   workflow_dispatch:
     inputs:
       drive_file_id:
