@@ -187,12 +187,13 @@ jobs:
             echo
             echo "Commit \`${GITHUB_SHA:0:8}\` - [run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
             echo
-            for f in sdk tools download patch release; do
+            for f in patch sdk tools download release; do
               if [ -f "$WORK/logs/$f.log" ]; then
-                echo "<details><summary>$f.log (tail)</summary>"
+                echo "<details><summary>$f.log</summary>"
                 echo
                 echo '```'
-                tail -n 60 "$WORK/logs/$f.log"
+                N=60; [ "$f" = "patch" ] && N=600
+                tail -n "$N" "$WORK/logs/$f.log"
                 echo '```'
                 echo "</details>"
                 echo
