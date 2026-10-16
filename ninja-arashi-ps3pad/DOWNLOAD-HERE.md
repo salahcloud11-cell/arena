@@ -1,12 +1,12 @@
 # ⬇️ تحميل نسخة Ninja Arashi + PS3 (النسخة الجديدة الشغالة)
 
-**تحميل مباشر (الحجم 65,298,266 بايت):**
+**تحميل مباشر (الحجم 65,290,074 بايت):**
 https://github.com/salahcloud11-cell/arena/releases/download/ninja-arashi-ps3-latest/ninja-arashi-1-4-ps3pad.apk
 
 **صفحة الإصدار (فيها نفس الملف + الشرح):**
 https://github.com/salahcloud11-cell/arena/releases/tag/ninja-arashi-ps3-latest
 
-- **sha256:** `97bdb69df575e102e8eade5dd9862eb321fa065d031323d3d79395ef8163463f`
+- **sha256:** `c88d3447d912a5ae9c4d5eb151cc26a95ce9aed4c482ba63a44dc848bf4715cc`
 - **الدليل الكامل:** https://github.com/salahcloud11-cell/arena/blob/arena/a4fd9a7a-arena/ninja-arashi-ps3pad/PS3-CONTROLLER-GUIDE.md
 
 ## مهم
