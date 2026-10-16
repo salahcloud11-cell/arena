@@ -1,16 +1,15 @@
 # Ninja Arashi 1.4 + PS3 controller (DualShock 3)
 
-Native DualShock 3 / Sixaxis support for **Ninja Arashi 1.4**
-(`com.blackpanther.ninjaarashi`, Unity 2018.3 IL2CPP), added without touching a
-single game asset: a small injected library drives the game's own control
-methods, so the ninja reacts to the pad exactly as it does to the on-screen
-buttons.
+Full DualShock 3 support for **Ninja Arashi 1.4** (`com.blackpanther.ninjaarashi`,
+Unity 2018.3 IL2CPP), for **32-bit and 64-bit Android devices** — the pad is read
+from Android and replayed as synthetic touches, so nothing depends on the CPU
+architecture (the first attempt in this folder used an arm64-only native hook and
+did not load on 32-bit phones; that code stays in `src/` for reference only).
 
-* **[Download the patched APK →](../../releases/latest)** (arm64-v8a, signed, ready to install)
-* **[ps3pad.ini](ps3pad.ini)** – button remapping / dead zone config
-* Sources: [`src/`](src) · build tools: [`tools/`](tools) · metadata evidence: [`analysis/`](analysis)
-
----
+* **[Download the APK →](../../releases/latest)** (release `ninja-arashi-ps3-latest`)
+* **[PS3-CONTROLLER-GUIDE.md](PS3-CONTROLLER-GUIDE.md)** – Arabic guide, controls, calibration
+* Java sources: [`java/com/ps3mod/`](java/com/ps3mod) · build tool: [`tools/patch_apk.py`](tools/patch_apk.py)
+* CI: [`.github/workflows/ninja-arashi-ps3.yml`](../.github/workflows/ninja-arashi-ps3.yml)
 
 ## Install
 
@@ -18,45 +17,66 @@ The APK is signed with a new key, so Android will not install it over the copy
 you already have.
 
 1. Uninstall the existing Ninja Arashi (this deletes its saved progress).
-2. Install the patched APK:
-   ```
-   adb uninstall com.blackpanther.ninjaarashi     # if still installed
-   adb install ninja-arashi-1-4-ps3pad.apk
-   ```
-   On the phone itself: allow "install unknown apps" for your file manager and
-   tap the APK.
-3. Do not update it from Google Play afterwards — Play would replace it and the
-   controller support would be gone.
-
-You need the original, paid-for/free-to-play game for Android; this repository
-only carries what is required to *modify* that APK, not the game itself.
-
-## Connect the DualShock 3
-
-* **USB OTG cable (recommended, no root):** plug the controller in. Android
-  detects it as a gamepad immediately and the mod picks it up.
-* **Bluetooth:** the DS3 uses Sony's own pairing handshake, which stock Android
-  does not implement, so on most phones a helper app or root is needed. If it is
-  already paired it works the same way.
-* On an Android TV box the pad is often joystick 1 or 2 — both are covered.
+2. Install the release APK (`adb install ...` or tap it on the phone).
+3. Connect the pad **before** starting the game (USB OTG is the root-free way).
+4. Press **SELECT** (the pad's Back button) inside the game to open the
+   calibration screen and drop each control where the game's own touch button is.
+5. Do not update it from Google Play afterwards — Play would replace it.
 
 ## Controls
 
-| DualShock 3 | Action | Game entry point |
-|---|---|---|
-| Left stick ←/→ or D-pad ←/→ | run left / right | `Button_Left/Right_press/release` |
-| ✕ Cross | jump | `Button_Jump_press/release` |
-| □ Square | attack / check | `Button_Check_press/release` |
-| ○ Circle | dash | `Button_Dash_press` |
-| △ Triangle | throw (Fi) | `Button_Fi_press` |
-| L1 / R1 | transform | `Button_Trans_press` |
+| DualShock 3 | Action |
+|---|---|
+| Left stick ←/→ or D-pad ←/→ | run left / right (held) |
+| ✕ Cross (or D-pad up) | jump (held) |
+| □ Square | attack / check (held) |
+| ○ Circle / R2 | dash (tap) |
+| △ Triangle | throw / Fi (tap) |
+| L1 / L2 | transform (tap) |
+| START | pause menu (tap) |
+| SELECT | open the calibration screen (never quits the game) |
 
-Menus (play / pause / restart) are still touch driven — the mod only drives the
-character's own control methods. Cross/Circle also register as the InputManager's
-"Submit"/"Cancel", so if the game's UI listens to Unity's EventSystem the pad may
-navigate menus as well.
+## How it works (Java mapper - the shipped path)
 
-## How it works
+1. `com.ps3mod.PS3App` is registered as the app's `Application` class
+   (`android:name` in the manifest). It installs a **dynamic proxy** over the
+   activity's `Window.Callback`, so controller key/`genericMotion` events are
+   seen *before* Unity's player activity swallows them.
+   A `Proxy` is used instead of a hand-written `Window.Callback` implementation
+   so the code needs only `java.lang.reflect` and cannot break when Android adds
+   methods to that interface.
+2. `com.ps3mod.PS3Mapper` converts the pad state into a real multi-touch stream
+   (up to 10 pointers) and dispatches it with `Activity.dispatchTouchEvent`,
+   exactly like a finger on the glass.
+3. Both classes are compiled with `javac`/`d8` and merged into the game's own
+   `classes.dex` (dex → smali via apktool, then rebuilt), so the APK stays
+   single-dex and keeps working on Android < 5 too.
+4. The calibration screen stores per-control screen positions in
+   `SharedPreferences`; the defaults are only a starting guess.
+
+## Build it yourself
+
+CI runs the whole thing (see the workflow). Locally, with a JDK and the Android
+build-tools:
+
+```bash
+python3 tools/patch_apk.py \
+  --apk-in ninja-arashi-1-4.apk \
+  --java-src java \
+  --apktool apktool.jar \
+  --android-jar "$ANDROID_HOME/platforms/android-34/android.jar" \
+  --build-tools "$ANDROID_HOME/build-tools/34.0.0" \
+  --java "$JAVA_HOME/bin/java" \
+  --work build/work --keydir build/keys \
+  --out build/ninja-arashi-1-4-ps3pad.apk
+```
+
+The script verifies the result: `apksigner verify` (v1 + v2), zip integrity, dex
+method counts, package/launchable-activity badging, and that every game asset
+(`global-metadata.dat`, `libunity.so`, `libil2cpp.so` for both ABIs) is
+byte-for-byte identical to the original.
+
+
 
 1. `lib/arm64-v8a/libps3pad.so` — a new native library added to the APK. It is
    built freestanding (`-nostdlib`): nothing is linked, all libc symbols are

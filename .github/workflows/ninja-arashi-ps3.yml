@@ -1,0 +1,213 @@
+name: Ninja Arashi PS3 controller mod
+
+# Builds Ninja Arashi 1.4 with PS3 (DualShock 3) controller support and
+# publishes it as the GitHub Release "ninja-arashi-ps3-latest".
+#
+# The mod is plain Java (com.ps3mod.PS3App + com.ps3mod.PS3Mapper) compiled into
+# the game's own classes.dex, so it works on 32-bit (armeabi-v7a) and 64-bit
+# devices: the pad is read from Android and replayed as synthetic touches.
+#
+# The original APK lives on Google Drive and is downloaded inside the runner
+# (it must stay "anyone with the link").  Logs are mirrored to a commit comment
+# because the agent sandbox cannot download raw run logs.
+
+on:
+  push:
+    branches: ["arena/**", "main"]
+    paths:
+      - "ninja-arashi-ps3pad/**"
+      - ".github/workflows/ninja-arashi-ps3.yml"
+  workflow_dispatch:
+    inputs:
+      drive_file_id:
+        description: "Google Drive file ID of the original APK (anyone-with-link)"
+        default: "1z6hwA--Ir_nMp4tQXef43AniT7KiybRX"
+        required: true
+        type: string
+      expected_bytes:
+        description: "Expected size of the original APK in bytes"
+        default: "63854276"
+        required: true
+        type: string
+      release_tag:
+        description: "Release tag to create/update with the modded APK"
+        default: "ninja-arashi-ps3-latest"
+        required: true
+        type: string
+
+concurrency:
+  group: ninja-arashi-ps3
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  DRIVE_FILE_ID: ${{ inputs.drive_file_id || '1z6hwA--Ir_nMp4tQXef43AniT7KiybRX' }}
+  EXPECTED_BYTES: ${{ inputs.expected_bytes || '63854276' }}
+  RELEASE_TAG: ${{ inputs.release_tag || 'ninja-arashi-ps3-latest' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      WORK: ${{ github.workspace }}/ps3work
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Prepare Android SDK
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK/logs"
+          {
+            SDKMAN="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            if [ ! -d "$ANDROID_HOME/build-tools/34.0.0" ] || [ ! -f "$ANDROID_HOME/platforms/android-34/android.jar" ]; then
+              yes | "$SDKMAN" --licenses >/dev/null 2>&1 || true
+              "$SDKMAN" "platforms;android-34" "build-tools;34.0.0"
+            fi
+            ls "$ANDROID_HOME/build-tools/34.0.0" | head -n 40
+            ls -la "$ANDROID_HOME/platforms/android-34/android.jar"
+            java -version
+            which d8 zipalign apksigner keytool javac
+          } 2>&1 | tee "$WORK/logs/sdk.log"
+
+      - name: Download apktool
+        run: |
+          set -euo pipefail
+          {
+            mkdir -p "$WORK/tools"
+            JSON="$(curl -sL https://api.github.com/repos/iBotPeaches/Apktool/releases/latest || true)"
+            URL="$(echo "$JSON" | jq -r '[.assets[]? | select(.name | test("^apktool_.*\\.jar$")) | .browser_download_url] | .[0] // empty')"
+            if [ -z "$URL" ]; then
+              URL="https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar"
+              echo "using pinned fallback"
+            fi
+            echo "url=$URL"
+            curl -sL -o "$WORK/tools/apktool.jar" "$URL"
+            SIZE="$(stat -c%s "$WORK/tools/apktool.jar")"
+            echo "apktool jar: $SIZE bytes"
+            [ "$SIZE" -gt 1000000 ] || { echo "ERROR: apktool jar too small"; exit 1; }
+            java -jar "$WORK/tools/apktool.jar" --version
+          } 2>&1 | tee "$WORK/logs/tools.log"
+
+      - name: Download the original APK from Google Drive
+        run: |
+          set -euo pipefail
+          {
+            pip install -q gdown
+            gdown "$DRIVE_FILE_ID" -O "$WORK/ninja-orig.apk"
+            SIZE="$(stat -c%s "$WORK/ninja-orig.apk")"
+            echo "downloaded bytes: $SIZE (expected $EXPECTED_BYTES)"
+            [ "$(head -c 2 "$WORK/ninja-orig.apk")" = "PK" ] || { echo "ERROR: not a zip/APK"; head -c 300 "$WORK/ninja-orig.apk" | cat -v; exit 1; }
+            [ "$SIZE" = "$EXPECTED_BYTES" ] || { echo "ERROR: size mismatch - Drive file changed?"; exit 1; }
+            unzip -l "$WORK/ninja-orig.apk" | head -n 20
+            unzip -l "$WORK/ninja-orig.apk" | tail -n 3
+          } 2>&1 | tee "$WORK/logs/download.log"
+
+      - name: Patch the APK
+        run: |
+          set -euo pipefail
+          python3 ninja-arashi-ps3pad/tools/patch_apk.py \
+            --apk-in "$WORK/ninja-orig.apk" \
+            --java-src ninja-arashi-ps3pad/java \
+            --apktool "$WORK/tools/apktool.jar" \
+            --android-jar "$ANDROID_HOME/platforms/android-34/android.jar" \
+            --build-tools "$ANDROID_HOME/build-tools/34.0.0" \
+            --java "$JAVA_HOME/bin/java" \
+            --work "$WORK/patch" \
+            --keydir "$WORK/keys" \
+            --out "$WORK/ninja-arashi-1-4-ps3pad.apk" \
+            2>&1 | tee "$WORK/logs/patch.log"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          {
+            APK="$WORK/ninja-arashi-1-4-ps3pad.apk"
+            ls -la "$APK" "$APK.sha256"
+            sha256sum "$APK"
+            TITLE="Ninja Arashi 1.4 + PS3 controller (DualShock 3)"
+            NOTES="$WORK/notes.md"
+            {
+              echo "Full DualShock 3 support for **Ninja Arashi 1.4** (Unity, touch-only game)."
+              echo
+              echo "Built by the *Ninja Arashi PS3 controller mod* workflow from commit \`${GITHUB_SHA:0:8}\`."
+              echo
+              echo "- works on **32-bit (armeabi-v7a)** and 64-bit devices (the pad is read"
+              echo "  from Android and replayed as synthetic touches - no native code added)"
+              echo "- uninstall the original game first: the APK is signed with a different key"
+              echo "- connect the pad **before** starting the game"
+              echo "- press **SELECT** (Back button on the pad) inside the game to open the"
+              echo "  calibration screen and place each button where the game's own button is"
+              echo "- controls: stick / D-pad = run, CROSS = jump, SQUARE = attack,"
+              echo "  CIRCLE = dash, TRIANGLE = throw, L1 = transform, START = pause"
+              echo
+              echo "Full guide: [PS3-CONTROLLER-GUIDE.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/ninja-arashi-ps3pad/PS3-CONTROLLER-GUIDE.md)"
+              echo
+              echo "sha256: \`$(sha256sum "$APK" | cut -d' ' -f1)\`"
+            } > "$NOTES"
+            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+              gh release upload "$RELEASE_TAG" "$APK" "$APK.sha256" --clobber
+              gh release edit "$RELEASE_TAG" --title "$TITLE" --notes-file "$NOTES"
+            else
+              gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$TITLE" \
+                --notes-file "$NOTES" "$APK" "$APK.sha256"
+            fi
+            gh release view "$RELEASE_TAG"
+          } 2>&1 | tee "$WORK/logs/release.log"
+
+      - name: Report (status + log tails)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          STATUS="${{ job.status }}"
+          BODY="$WORK/comment.md"
+          {
+            echo "### Ninja Arashi PS3 mod - \`$STATUS\`"
+            echo
+            echo "Commit \`${GITHUB_SHA:0:8}\` - [run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+            echo
+            for f in sdk tools download patch release; do
+              if [ -f "$WORK/logs/$f.log" ]; then
+                echo "<details><summary>$f.log (tail)</summary>"
+                echo
+                echo '```'
+                tail -n 60 "$WORK/logs/$f.log"
+                echo '```'
+                echo "</details>"
+                echo
+              fi
+            done
+            if [ -f "$WORK/ninja-arashi-1-4-ps3pad.apk" ]; then
+              echo "Artifact: \`$(stat -c%s "$WORK/ninja-arashi-1-4-ps3pad.apk")\` bytes, sha256 \`$(sha256sum "$WORK/ninja-arashi-1-4-ps3pad.apk" | cut -d' ' -f1)\`"
+            fi
+          } > "$BODY"
+          # keep the comment under the API limit
+          head -c 60000 "$BODY" > "$BODY.trim" && mv "$BODY.trim" "$BODY"
+          curl -sS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" \
+            -d "$(jq -n --arg body "$(cat "$BODY")" '{body:$body}')" \
+            | jq -r '.html_url // .message'
+
+      - name: Upload logs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ninja-arashi-ps3-logs
+          path: ${{ env.WORK }}/logs
+          if-no-files-found: warn
+          retention-days: 14
