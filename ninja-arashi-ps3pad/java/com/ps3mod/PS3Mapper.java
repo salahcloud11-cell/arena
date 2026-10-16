@@ -80,6 +80,12 @@ public class PS3Mapper {
     private static long gestureDownTime = 0L;
 
     private static final long TAP_RELEASE_MS = 90L;
+
+    /** Movement style: true = drag the movement control (most games use a
+     *  joystick/drag zone), false = just hold the button down.  Toggleable in
+     *  the calibration screen, and remembered. */
+    private static boolean joyMode = true;
+    private static final float JOY_RADIUS = 0.06f;
     private static final float STICK_DEADZONE = 0.28f;
 
     private static Handler handler = null;
@@ -171,6 +177,7 @@ public class PS3Mapper {
         }
         try {
             SharedPreferences sp = a.getSharedPreferences("ps3pad", Context.MODE_PRIVATE);
+            joyMode = sp.getBoolean("joy_mode", true);
             for (int i = 0; i < FN; i++) {
                 px[i] = sp.getFloat("x_" + SKEY[i], DX[i]);
                 py[i] = sp.getFloat("y_" + SKEY[i], DY[i]);
@@ -182,6 +189,7 @@ public class PS3Mapper {
     private static void savePositions(Activity a) {
         try {
             SharedPreferences.Editor e = a.getSharedPreferences("ps3pad", Context.MODE_PRIVATE).edit();
+            e.putBoolean("joy_mode", joyMode);
             for (int i = 0; i < FN; i++) {
                 e.putFloat("x_" + SKEY[i], px[i]);
                 e.putFloat("y_" + SKEY[i], py[i]);
@@ -287,6 +295,18 @@ public class PS3Mapper {
         pY[pid] = y;
         pCount++;
         pushEvent(a, pCount == 1 ? MotionEvent.ACTION_DOWN : MotionEvent.ACTION_POINTER_DOWN, pid);
+    }
+
+    /** Reposition a pointer that is already down (a real finger drag). */
+    private static void ptrMove(Activity a, int pid, float x, float y) {
+        if (pid < 0 || pid >= MAX_POINTERS || !pActive[pid]) {
+            return;
+        }
+        pX[pid] = x;
+        pY[pid] = y;
+        if (pCount > 0) {
+            pushEvent(a, MotionEvent.ACTION_MOVE, -1);
+        }
     }
 
     private static void ptrUp(Activity a, int pid) {
@@ -404,6 +424,21 @@ public class PS3Mapper {
         if (!wantRight && moveRightHeld) {
             releaseFunc(a, F_RIGHT);
             moveRightHeld = false;
+        }
+        if (joyMode) {
+            /* Movement in most of these games is a drag zone rather than two
+             * buttons, so slide the finger from the calibrated spot by an
+             * amount proportional to the stick.  The offset is small enough
+             * that it also stays inside a normal on-screen button. */
+            float mag = Math.abs(x);
+            if (mag > 1f) {
+                mag = 1f;
+            }
+            if (wantRight && moveRightHeld) {
+                ptrMove(a, F_RIGHT, fx(a, F_RIGHT) + mag * JOY_RADIUS * viewW(a), fy(a, F_RIGHT));
+            } else if (wantLeft && moveLeftHeld) {
+                ptrMove(a, F_LEFT, fx(a, F_LEFT) - mag * JOY_RADIUS * viewW(a), fy(a, F_LEFT));
+            }
         }
     }
 
@@ -604,7 +639,7 @@ public class PS3Mapper {
             final LinearLayout panel = new LinearLayout(a);
             panel.setOrientation(LinearLayout.VERTICAL);
             TextView title = new TextView(a);
-            title.setText("معايرة يد PS3\nاضغط على أي زر ثم المس مكان زرّ اللعبة على الشاشة.\nثم اضغط حفظ. (زر Back = إلغاء)");
+            title.setText("معايرة يد PS3\nاضغط على أي زر ثم المس مكان زرّ اللعبة على الشاشة.\nإلا ما خدمتش الحركة، بدّل (طريقة الحركة) لـ زر ثابت.\nثم اضغط حفظ. (زر Back = إغلاق)");
             title.setTextColor(0xFFFFFFFF);
             title.setTextSize(11f);
             panel.addView(title, new LinearLayout.LayoutParams(
@@ -623,6 +658,18 @@ public class PS3Mapper {
                 panel.addView(b, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             }
+            final Button modeBtn = new Button(a);
+            modeBtn.setTextSize(10f);
+            modeBtn.setText(joyMode ? "طريقة الحركة: سحب (عصا) ✔" : "طريقة الحركة: زر ثابت");
+            modeBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    joyMode = !joyMode;
+                    modeBtn.setText(joyMode ? "طريقة الحركة: سحب (عصا) ✔" : "طريقة الحركة: زر ثابت");
+                }
+            });
+            panel.addView(modeBtn, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
             Button save = new Button(a);
             save.setText("حفظ وإغلاق");
             save.setTextSize(11f);
