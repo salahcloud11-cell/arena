@@ -76,7 +76,11 @@ jobs:
             ls "$ANDROID_HOME/build-tools/34.0.0" | head -n 40
             ls -la "$ANDROID_HOME/platforms/android-34/android.jar"
             java -version
-            which d8 zipalign apksigner keytool javac
+            for t in d8 zipalign apksigner aapt; do
+              ls -la "$ANDROID_HOME/build-tools/34.0.0/$t"
+            done
+            "$JAVA_HOME/bin/javac" -version
+            "$JAVA_HOME/bin/keytool" -help >/dev/null 2>&1 || true
           } 2>&1 | tee "$WORK/logs/sdk.log"
 
       - name: Download apktool

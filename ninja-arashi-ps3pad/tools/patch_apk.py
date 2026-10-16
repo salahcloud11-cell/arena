@@ -174,11 +174,23 @@ def dex_to_smali(apktool, java, work, dex, orig_apk):
     dex tooling is needed."""
     log("== 4. converting the mapper dex to smali")
     dummy = os.path.join(work, "dummy.apk")
+    # Take the manifest AND the resource table from the original APK: with both
+    # present apktool decodes this stub exactly like it decoded the real APK in
+    # step 1, so the dex -> smali conversion cannot hit resource resolution
+    # errors, and no external dex tooling is needed.
     with zipfile.ZipFile(orig_apk) as z:
         manifest = z.read("AndroidManifest.xml")
-    with zipfile.ZipFile(dummy, "w") as z:
+        try:
+            arsc = z.read("resources.arsc")
+        except KeyError:
+            arsc = None
+    with zipfile.ZipFile(dummy, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("AndroidManifest.xml", manifest)
+        if arsc is not None:
+            z.writestr("resources.arsc", arsc)
         z.write(dex, "classes.dex")
+    log("    stub APK for apktool: manifest%s + mapper dex"
+        % (" + resources.arsc" if arsc is not None else ""))
     out = os.path.join(work, "dummy-out")
     if os.path.isdir(out):
         shutil.rmtree(out)
