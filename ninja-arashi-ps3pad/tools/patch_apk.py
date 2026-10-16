@@ -258,6 +258,26 @@ def rebuild(apktool, java, tree, unsig):
         log("    %s: %d methods" % (name, count_dex_methods(path)))
 
 
+def normalize_zip(apk_in, apk_out):
+    """Rewrite the rebuilt APK with fixed entry timestamps, so that rebuilding
+    the same sources yields the same file (apktool stamps entries with the
+    checkout time, which would change the sha256 on every run)."""
+    log("== 6b. normalising zip timestamps (reproducible output)")
+    with zipfile.ZipFile(apk_in) as src:
+        infos = src.infolist()
+        with zipfile.ZipFile(apk_out, "w", zipfile.ZIP_DEFLATED, allowZip64=True,
+                             compresslevel=9) as dst:
+            for zi in infos:
+                data = src.read(zi.filename)
+                zi2 = zipfile.ZipInfo(zi.filename, (2020, 1, 1, 0, 0, 0))
+                zi2.compress_type = zi.compress_type
+                zi2.external_attr = zi.external_attr
+                zi2.internal_attr = zi.internal_attr
+                zi2.create_system = zi.create_system
+                dst.writestr(zi2, data)
+    log("    %d entries rewritten" % len(infos))
+
+
 def sign(build_tools, java, keydir, apk_in, apk_out):
     log("== 7. zipalign + apksigner")
     os.makedirs(keydir, exist_ok=True)
@@ -390,7 +410,9 @@ def main():
         strip_old_signature(tree)
         rebuild(a.apktool, a.java, tree, unsig)
     if "sign" not in skip:
-        sign(a.build_tools, a.java, a.keydir, unsig, a.out)
+        normalized = os.path.join(a.work, "unsigned-normalized.apk")
+        normalize_zip(unsig, normalized)
+        sign(a.build_tools, a.java, a.keydir, normalized, a.out)
     ok = verify(a.out, a.apk_in, a.build_tools)
     if os.path.exists(a.out):
         with open(a.out + ".sha256", "w") as fh:

@@ -17,6 +17,10 @@ on:
     paths:
       - "ninja-arashi-ps3pad/**"
       - ".github/workflows/ninja-arashi-ps3.yml"
+    # docs/hash-only changes do not need a 65 MB rebuild
+    paths-ignore:
+      - "ninja-arashi-ps3pad/**/*.md"
+      - "ninja-arashi-ps3pad/**/*.sha256"
   workflow_dispatch:
     inputs:
       drive_file_id:
