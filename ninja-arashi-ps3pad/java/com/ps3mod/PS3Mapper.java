@@ -144,12 +144,13 @@ public class PS3Mapper {
             try {
                 c.setOnKeyListener(new View.OnKeyListener() {
                     public boolean onKey(View v, int code, KeyEvent e) {
-                        return onKey(a, e);
+                        /* qualify: OnKeyListener.onKey would otherwise win */
+                        return PS3Mapper.onKey(a, e);
                     }
                 });
                 c.setOnGenericMotionListener(new View.OnGenericMotionListener() {
                     public boolean onGenericMotion(View v, MotionEvent e) {
-                        return onMotion(a, e);
+                        return PS3Mapper.onMotion(a, e);
                     }
                 });
             } catch (Throwable ignored) {
