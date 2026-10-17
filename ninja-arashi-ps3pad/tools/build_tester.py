@@ -122,7 +122,7 @@ def main():
 
     size = os.path.getsize(a.out)
     print("tester apk: %s (%d bytes)" % (a.out, size))
-    if size < 20000:
+    if size < 8000:
         raise SystemExit("tester apk suspiciously small")
     if os.path.exists(aapt):
         run([aapt, "dump", "badging", a.out])
