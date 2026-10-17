@@ -32,7 +32,7 @@ public class PS3Activity extends com.unity3d.player.UnityPlayerActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         try {
-            PS3Mapper.attach(this);
+            PS3Mapper.onActivityCreated(this);
         } catch (Throwable ignored) {
         }
     }
@@ -41,7 +41,6 @@ public class PS3Activity extends com.unity3d.player.UnityPlayerActivity {
     protected void onResume() {
         super.onResume();
         try {
-            PS3Mapper.attach(this);
             PS3Mapper.onActivityResumed(this);
         } catch (Throwable ignored) {
         }

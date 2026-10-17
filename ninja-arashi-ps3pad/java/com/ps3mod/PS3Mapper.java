@@ -1,42 +1,53 @@
 package com.ps3mod;
 
 import android.app.Activity;
+import android.app.Dialog;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 /**
- * DualShock 3 -> Ninja Arashi, by replaying pad input as the game's own touch
- * controls (the "developer buttons": the same MotionEvents a finger produces on
- * the game's on-screen buttons).
+ * DualShock 3 -> Ninja Arashi.
  *
- * The game is touch-only: it has no gamepad support, so nothing can be handed to
- * it as a "real" button press.  What it does understand is touches, and those
- * are what this class produces -- up to 10 independent fingers, so actions can
- * be combined (run + jump + attack at once).
+ * Assumption this file is built on: Ninja Arashi is a touch-only game.  It has no
+ * gamepad API and no gamepad code path, so the only way to drive it is with the
+ * same input a finger produces on its on-screen buttons.  That is what this does:
+ * pad state is converted into real MotionEvents (up to 10 pointers) and fed to
+ * the activity, so the game cannot tell them apart from the developer's buttons.
  *
- * Entry points (called from PS3Activity, on the UI thread):
- *   onKey(Activity, KeyEvent)     -- buttons, D-pad, SELECT
- *   onMotion(Activity, MotionEvent)-- sticks (joystick axes)
- *   attach / onActivityResumed    -- setup, pad detection, first-run calibration
+ * v3 changes (v2 was invisible / unresponsive on the device):
+ *   - the calibration UI is a Dialog (its own window).  Drawn as a child of the
+ *     activity's decor it sat *behind* Unity's SurfaceView, so nothing appeared.
+ *   - the first pad button pressed in a session opens calibration, so it no
+ *     longer depends on SELECT arriving (a DS3's SELECT is KEYCODE_BACK on some
+ *     Android builds, KEYCODE_BUTTON_SELECT on others - both are handled).
+ *   - a status line in the dialog reports what Android actually delivers, and a
+ *     test button fires the last configured control so a position can be checked
+ *     without leaving the screen.
  */
 public class PS3Mapper {
 
     private static final String TAG = "PS3Mapper";
+    private static final String VER = "v3";
 
     /* ------------------------------------------------------------------ */
     /* functions                                                          */
@@ -48,8 +59,8 @@ public class PS3Mapper {
     private static final String[] SKEY = {"move", "jump", "attack", "dash",
             "transform", "throw", "pause", "alt"};
     private static final String[] LABEL = {
-            "حركة (مركز العصا/اليسار)", "قفز ✕", "هجوم □", "داش ○",
-            "تحوّل L1", "رمي △", "إيقاف START", "يمين (وضع الأزرار فقط)"};
+            "حركة (مركز العصا)", "قفز ✕", "هجوم □", "داش ○",
+            "تحوّل L1", "رمي △", "إيقاف START", "اليمين (وضع الأزرار)"};
 
     /** First-run guesses; the calibration screen replaces them. */
     private static final float[] DX = {0.120f, 0.880f, 0.760f, 0.640f,
@@ -57,10 +68,6 @@ public class PS3Mapper {
     private static final float[] DY = {0.800f, 0.800f, 0.930f, 0.930f,
             0.930f, 0.600f, 0.070f, 0.700f};
 
-    /**
-     * hold = the finger stays down while the pad button is held (movement and
-     * the two main actions), tap = a short press (dash, transform, throw, pause).
-     */
     private static final boolean[] HOLD = {true, true, true, false,
             false, false, false, false};
 
@@ -94,12 +101,12 @@ public class PS3Mapper {
     /* state                                                              */
     /* ------------------------------------------------------------------ */
     private static Activity activity = null;
+    private static Dialog dialog = null;
+    private static TextView statusView = null;
     private static boolean enabled = true;
-    private static boolean connectedToast = false;
-    private static boolean overlay = false;
-    private static View overlayView = null;
     private static boolean calibrating = false;
     private static int captureIndex = -1;
+    private static int lastCapture = -1;
     private static boolean joyMode = true;
 
     private static boolean dLeft = false, dRight = false, dUp = false, dDown = false;
@@ -107,8 +114,9 @@ public class PS3Mapper {
     private static boolean leftHeld = false, rightHeld = false, joyHeld = false;
 
     private static long lastPadEvent = 0L;
-    private static boolean noPadWarned = false;
-    private static boolean resumedOnce = false;
+    private static boolean connectedToast = false;
+    private static boolean autoOpened = false;
+    private static long l3Down = 0L, r3Down = 0L;
 
     /* ------------------------------------------------------------------ */
     /* setup                                                              */
@@ -121,11 +129,19 @@ public class PS3Mapper {
         loadPositions(a);
     }
 
-    /** Called from PS3Activity.onResume: pad detection, first-run calibration. */
+    /** Called from PS3Activity.onCreate: proves the mod is loaded. */
+    public static void onActivityCreated(final Activity a) {
+        attach(a);
+        Log.i(TAG, "PS3 mod " + VER + " loaded");
+        handler().postDelayed(new Runnable() {
+            public void run() {
+                toast(a, "PS3 mod " + VER + " شغال", Toast.LENGTH_SHORT);
+            }
+        }, 700L);
+    }
+
+    /** Called from PS3Activity.onResume. */
     public static void onActivityResumed(final Activity a) {
-        if (a == null) {
-            return;
-        }
         attach(a);
         handler().postDelayed(new Runnable() {
             public void run() {
@@ -137,62 +153,44 @@ public class PS3Mapper {
                 public void run() {
                     showCalibration();
                 }
-            }, 3200L);
-        }
-        if (!resumedOnce) {
-            resumedOnce = true;
-            handler().postDelayed(new Runnable() {
-                public void run() {
-                    if (lastPadEvent == 0L && !noPadWarned) {
-                        noPadWarned = true;
-                        toast(a, "لا توجد إشارة من اليد بعد — وصّلها قبل فتح اللعبة");
-                    }
-                }
-            }, 20000L);
+            }, 1200L);
         }
     }
 
-    /**
-     * Tells the player exactly what Android sees: it is the difference between
-     * "the pad is not connected" and "the pad is connected but the game ignores
-     * it", which cannot be guessed without a device.
-     */
-    private static void reportPadStatus(Activity a) {
+    private static int countPads() {
+        int pads = 0;
         try {
             int[] ids = InputDevice.getDeviceIds();
-            StringBuilder sb = new StringBuilder();
-            int pads = 0;
             for (int i = 0; i < ids.length; i++) {
-                InputDevice d = InputDevice.getDevice(ids[i]);
-                if (d == null) {
-                    continue;
-                }
-                int src = d.getSources();
-                boolean pad = (src & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
-                        || (src & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK;
-                if (pad) {
+                int src = InputDevice.getDevice(ids[i]).getSources();
+                if ((src & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
+                        || (src & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK) {
                     pads++;
-                    if (sb.length() > 0) {
-                        sb.append(", ");
-                    }
-                    sb.append(d.getName());
                 }
             }
-            Log.i(TAG, "pad scan: " + pads + " gamepad(s) [" + sb + "]");
-            if (pads == 0) {
-                toast(a, "ما كايناش يد متصلة — وصّل الـ PS3 قبل ما تفتح اللعبة");
-            } else {
-                toast(a, "اليد متصلة: " + sb);
-            }
-        } catch (Throwable t) {
-            Log.w(TAG, "pad scan failed", t);
+        } catch (Throwable ignored) {
         }
+        return pads;
+    }
+
+    private static void reportPadStatus(Activity a) {
+        int pads = countPads();
+        if (pads == 0) {
+            toast(a, "ما كايناش يد متصلة — وصّل الـ PS3 قبل ما تفتح اللعبة", Toast.LENGTH_LONG);
+        } else {
+            toast(a, "اليد متصلة ✓ (" + pads + ") — اضغط أي زر باش تفتح المعايرة", Toast.LENGTH_LONG);
+        }
+        updateStatus(null, -1);
     }
 
     private static void toast(Activity a, String msg) {
+        toast(a, msg, Toast.LENGTH_LONG);
+    }
+
+    private static void toast(Activity a, String msg, int dur) {
         try {
             if (a != null) {
-                Toast.makeText(a.getApplicationContext(), msg, Toast.LENGTH_LONG).show();
+                Toast.makeText(a.getApplicationContext(), msg, dur).show();
             }
         } catch (Throwable ignored) {
         }
@@ -200,11 +198,26 @@ public class PS3Mapper {
 
     private static void padSeen(Activity a) {
         lastPadEvent = SystemClock.uptimeMillis();
-        noPadWarned = false;
         if (!connectedToast) {
             connectedToast = true;
-            toast(a, "PS3: اليد شغالة ✓ — زر SELECT للمعايرة");
         }
+    }
+
+    private static void updateStatus(String key, int code) {
+        final TextView tv = statusView;
+        if (tv == null) {
+            return;
+        }
+        final String text = "اليدات: " + countPads()
+                + (key == null ? "" : "   |   آخر إشارة: " + key + " (" + code + ")");
+        handler().post(new Runnable() {
+            public void run() {
+                try {
+                    tv.setText(text);
+                } catch (Throwable ignored) {
+                }
+            }
+        });
     }
 
     /* ------------------------------------------------------------------ */
@@ -439,12 +452,6 @@ public class PS3Mapper {
         return v < 0 ? -s : s;
     }
 
-    /**
-     * Directional movement.  Two styles, because the game's left control is
-     * either a drag joystick or a pair of arrow buttons:
-     *   joyMode  -> one finger on the calibrated centre, slid left/right
-     *   buttons  -> a held finger on the left or right button
-     */
     private static void updateMove(Activity a) {
         float x = axisX;
         if (dLeft) {
@@ -482,7 +489,7 @@ public class PS3Mapper {
         boolean wantLeft = x < -0.05f;
         boolean wantRight = x > 0.05f;
         if (wantLeft && rightHeld) {
-            ptrUp(a, F_ALT);              /* right button uses its own pointer */
+            ptrUp(a, F_ALT);
             rightHeld = false;
         }
         if (wantRight && leftHeld) {
@@ -532,15 +539,21 @@ public class PS3Mapper {
                 || code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN;
     }
 
+    private static boolean isSelect(int code) {
+        return code == KeyEvent.KEYCODE_BACK
+                || code == KeyEvent.KEYCODE_BUTTON_SELECT
+                || code == KeyEvent.KEYCODE_BUTTON_MODE;
+    }
+
     private static int functionFor(int keyCode) {
         switch (keyCode) {
-            case KeyEvent.KEYCODE_BUTTON_A:      /* X / Cross  */
+            case KeyEvent.KEYCODE_BUTTON_A:
                 return F_JUMP;
-            case KeyEvent.KEYCODE_BUTTON_B:      /* O / Circle */
+            case KeyEvent.KEYCODE_BUTTON_B:
                 return F_DASH;
-            case KeyEvent.KEYCODE_BUTTON_X:      /* Square     */
+            case KeyEvent.KEYCODE_BUTTON_X:
                 return F_ATTACK;
-            case KeyEvent.KEYCODE_BUTTON_Y:      /* Triangle   */
+            case KeyEvent.KEYCODE_BUTTON_Y:
                 return F_FI;
             case KeyEvent.KEYCODE_BUTTON_R1:
                 return F_ATTACK;
@@ -562,7 +575,6 @@ public class PS3Mapper {
     /* ------------------------------------------------------------------ */
     /* pad events                                                         */
     /* ------------------------------------------------------------------ */
-    /** @return true when the mapper consumed the event. */
     public static boolean onKey(Activity a, KeyEvent ev) {
         if (a == null || ev == null) {
             return false;
@@ -574,15 +586,35 @@ public class PS3Mapper {
             int code = ev.getKeyCode();
             boolean pad = isPad(ev.getDeviceId(), ev.getSource());
 
-            /* SELECT on a DualShock 3 arrives as KEYCODE_BACK.  Only treat BACK
-             * as SELECT when it comes from a gamepad, so the phone's own back
-             * key keeps working. */
-            if (code == KeyEvent.KEYCODE_BACK) {
-                if (!pad) {
-                    return false;
+            /* The phone's own back key is not ours unless a pad is involved. */
+            if (code == KeyEvent.KEYCODE_BACK && !pad) {
+                if (calibrating) {
+                    hideCalibration();
+                    return true;
                 }
-                padSeen(a);
-                if (ev.getAction() == KeyEvent.ACTION_UP) {
+                return false;
+            }
+            if (!pad && !isDpad(code)) {
+                return false;
+            }
+            if (ev.getRepeatCount() > 0) {
+                return true;
+            }
+            padSeen(a);
+            updateStatus(KeyEvent.keyCodeToString(code), code);
+
+            boolean down = ev.getAction() == KeyEvent.ACTION_DOWN;
+
+            /* Any pad button opens calibration the first time, so the screen can
+             * be reached even if SELECT never arrives as KEYCODE_BACK. */
+            if (!calibrated(a) && !autoOpened) {
+                autoOpened = true;
+                showCalibration();
+                return true;
+            }
+
+            if (isSelect(code)) {
+                if (!down) {
                     if (calibrating) {
                         hideCalibration();
                     } else {
@@ -592,18 +624,27 @@ public class PS3Mapper {
                 return true;
             }
 
-            if (!pad && !isDpad(code)) {
-                return false;
-            }
-            if (ev.getRepeatCount() > 0) {
+            if (code == KeyEvent.KEYCODE_BUTTON_THUMBL) {
+                l3Down = down ? SystemClock.uptimeMillis() : 0L;
+                if (!down && r3Down > 0L && SystemClock.uptimeMillis() - r3Down < 800L) {
+                    r3Down = 0L;
+                    if (calibrating) {
+                        hideCalibration();
+                    } else {
+                        showCalibration();
+                    }
+                }
                 return true;
             }
-            padSeen(a);
-            if (!enabled || calibrating) {
+            if (code == KeyEvent.KEYCODE_BUTTON_THUMBR) {
+                r3Down = down ? SystemClock.uptimeMillis() : 0L;
                 return true;
             }
 
-            boolean down = ev.getAction() == KeyEvent.ACTION_DOWN;
+            if (calibrating) {
+                return true;
+            }
+
             if (isDpad(code)) {
                 if (code == KeyEvent.KEYCODE_DPAD_LEFT) {
                     dLeft = down;
@@ -645,7 +686,6 @@ public class PS3Mapper {
         }
     }
 
-    /** @return true when the mapper consumed the event. */
     public static boolean onMotion(Activity a, MotionEvent ev) {
         if (a == null || ev == null) {
             return false;
@@ -682,125 +722,199 @@ public class PS3Mapper {
     }
 
     /* ------------------------------------------------------------------ */
-    /* calibration overlay                                                */
+    /* calibration dialog                                                 */
     /* ------------------------------------------------------------------ */
     private static float dp(Activity a, float v) {
         return v * a.getResources().getDisplayMetrics().density;
     }
 
+    private static Button mkButton(final Activity a, String text, float size) {
+        Button b = new Button(a);
+        b.setText(text);
+        b.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
+        b.setAllCaps(false);
+        b.setPadding((int) dp(a, 8), (int) dp(a, 2), (int) dp(a, 8), (int) dp(a, 2));
+        b.setMinHeight(0);
+        b.setMinimumHeight(0);
+        return b;
+    }
+
     static void showCalibration() {
         final Activity a = activity;
-        if (a == null || overlay) {
+        if (a == null || dialog != null) {
             return;
         }
         try {
             calibrating = true;
             releaseAll(a);
 
-            final FrameLayout root = new FrameLayout(a);
+            final Dialog d = new Dialog(a, android.R.style.Theme_Translucent_NoTitleBar_Fullscreen);
+            d.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+            FrameLayout root = new FrameLayout(a);
             root.setBackgroundColor(0x66000000);
 
-            final LinearLayout panel = new LinearLayout(a);
-            panel.setOrientation(LinearLayout.VERTICAL);
-            panel.setBackgroundColor(0xDD000000);
-            panel.setPadding((int) dp(a, 6), (int) dp(a, 6), (int) dp(a, 6), (int) dp(a, 6));
-            panel.setClickable(true);   /* a tap on the panel must not set a position */
+            LinearLayout column = new LinearLayout(a);
+            column.setOrientation(LinearLayout.VERTICAL);
+            column.setPadding((int) dp(a, 8), (int) dp(a, 8), (int) dp(a, 8), (int) dp(a, 8));
+            column.setBackgroundColor(0xE6000000);
+
+            final ScrollView scroll = new ScrollView(a);
 
             TextView title = new TextView(a);
-            title.setText("معايرة يد PS3\n١) اضغط زرً من القائمة  ٢) المس مكان زرّ اللعبة على الشاشة\nثم «حفظ وإغلاق». (زر SELECT أو Back يفتح/يسد هاد الشاشة)");
-            title.setTextColor(0xFFFFFFFF);
-            title.setTextSize(11f);
-            panel.addView(title, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            title.setText("معايرة PS3 " + VER
+                    + "\n١) اضغط زرً من القائمة  ٢) المس مكان زرّ اللعبة على الشاشة\nثم «حفظ وإغلاق».");
+            title.setTextColor(Color.WHITE);
+            title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
+            column.addView(title);
+
+            statusView = new TextView(a);
+            statusView.setTextColor(0xFF7CFF7C);
+            statusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f);
+            statusView.setText("اليدات: " + countPads() + "   |   آخر إشارة: —");
+            column.addView(statusView);
+
+            final View captureLayer = new View(a);
+            captureLayer.setVisibility(View.GONE);
 
             for (int i = 0; i < FN; i++) {
                 final int f = i;
-                Button b = new Button(a);
-                b.setText(LABEL[i]);
-                b.setTextSize(10f);
+                Button b = mkButton(a, LABEL[i], 11f);
                 b.setOnClickListener(new View.OnClickListener() {
                     public void onClick(View v) {
                         captureIndex = f;
-                        ((ViewGroup) v.getParent()).setVisibility(View.GONE);
-                        toast(a, "المس مكان: " + LABEL[f]);
+                        lastCapture = f;
+                        scroll.setVisibility(View.GONE);
+                        captureLayer.setVisibility(View.VISIBLE);
+                        captureLayer.bringToFront();
+                        toast(a, "المس مكان: " + LABEL[f], Toast.LENGTH_SHORT);
                     }
                 });
-                panel.addView(b, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                column.addView(b);
             }
 
-            final Button modeBtn = new Button(a);
-            modeBtn.setTextSize(10f);
-            modeBtn.setText(joyMode ? "الحركة: سحب عصا ✔ (بدّل لزر ثابت)" : "الحركة: زر ثابت (بدّل لعصا)");
+            final Button modeBtn = mkButton(a, joyMode
+                    ? "الحركة: سحب عصا ✔ (اضغط للتبديل)"
+                    : "الحركة: زر ثابت (اضغط للتبديل)", 11f);
             modeBtn.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     joyMode = !joyMode;
-                    modeBtn.setText(joyMode ? "الحركة: سحب عصا ✔ (بدّل لزر ثابت)" : "الحركة: زر ثابت (بدّل لعصا)");
+                    modeBtn.setText(joyMode
+                            ? "الحركة: سحب عصا ✔ (اضغط للتبديل)"
+                            : "الحركة: زر ثابت (اضغط للتبديل)");
                 }
             });
-            panel.addView(modeBtn, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            column.addView(modeBtn);
 
-            Button save = new Button(a);
-            save.setText("حفظ وإغلاق");
-            save.setTextSize(11f);
+            LinearLayout row = new LinearLayout(a);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+
+            Button test = mkButton(a, "تجربة آخر زر", 11f);
+            test.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    final int f = lastCapture >= 0 ? lastCapture : F_JUMP;
+                    toast(a, "تجربة: " + LABEL[f], Toast.LENGTH_SHORT);
+                    boolean wasCal = calibrating;
+                    calibrating = false;          /* allow the test injection */
+                    pressFunc(a, f);
+                    handler().postDelayed(new Runnable() {
+                        public void run() {
+                            releaseFunc(a, f);
+                        }
+                    }, 220L);
+                    calibrating = wasCal;
+                }
+            });
+            row.addView(test);
+
+            Button save = mkButton(a, "حفظ وإغلاق", 11f);
             save.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     savePositions(a);
                     hideCalibration();
-                    toast(a, "تم حفظ المعايرة ✓");
+                    toast(a, "تم حفظ المعايرة ✓", Toast.LENGTH_SHORT);
                 }
             });
-            panel.addView(save, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            row.addView(save);
+            column.addView(row);
 
-            FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            plp.gravity = Gravity.TOP | Gravity.LEFT;
-            plp.leftMargin = (int) dp(a, 10);
-            plp.topMargin = (int) dp(a, 10);
-            root.addView(panel, plp);
+            Button close = mkButton(a, "إغلاق بلا حفظ", 10f);
+            close.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    hideCalibration();
+                }
+            });
+            column.addView(close);
 
-            root.setOnTouchListener(new View.OnTouchListener() {
+            scroll.addView(column, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+            FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(
+                    (int) dp(a, 300), ViewGroup.LayoutParams.MATCH_PARENT);
+            slp.gravity = Gravity.LEFT | Gravity.TOP;
+            root.addView(scroll, slp);
+            root.addView(captureLayer, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+            captureLayer.setOnTouchListener(new View.OnTouchListener() {
                 public boolean onTouch(View v, MotionEvent e) {
                     if (e.getAction() == MotionEvent.ACTION_DOWN && captureIndex >= 0) {
-                        int w = root.getWidth() > 0 ? root.getWidth() : viewW(a);
-                        int h = root.getHeight() > 0 ? root.getHeight() : viewH(a);
+                        int w = v.getWidth() > 0 ? v.getWidth() : viewW(a);
+                        int h = v.getHeight() > 0 ? v.getHeight() : viewH(a);
                         px[captureIndex] = e.getX() / w;
                         py[captureIndex] = e.getY() / h;
                         captureIndex = -1;
-                        panel.setVisibility(View.VISIBLE);
+                        captureLayer.setVisibility(View.GONE);
+                        scroll.setVisibility(View.VISIBLE);
+                        return true;
+                    }
+                    return true;
+                }
+            });
+
+            d.setContentView(root);
+            Window w = d.getWindow();
+            if (w != null) {
+                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+                w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                WindowManager.LayoutParams lp = w.getAttributes();
+                lp.dimAmount = 0.35f;
+                w.setAttributes(lp);
+            }
+            d.setOnKeyListener(new Dialog.OnKeyListener() {
+                public boolean onKey(android.content.DialogInterface di, int code, KeyEvent e) {
+                    if ((code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_BUTTON_SELECT)
+                            && e.getAction() == KeyEvent.ACTION_UP) {
+                        hideCalibration();
                         return true;
                     }
                     return false;
                 }
             });
-
-            ViewGroup decor = (ViewGroup) a.getWindow().getDecorView();
-            decor.addView(root, new ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            overlayView = root;
-            overlay = true;
-            Log.i(TAG, "calibration opened");
+            d.show();
+            dialog = d;
+            Log.i(TAG, "calibration dialog shown");
         } catch (Throwable t) {
-            overlay = false;
+            Log.w(TAG, "calibration dialog failed", t);
+            dialog = null;
             calibrating = false;
-            Log.w(TAG, "calibration failed", t);
+            toast(a, "ما قدرتش نفتح شاشة المعايرة: " + t.getClass().getSimpleName());
         }
     }
 
     private static void hideCalibration() {
-        final Activity a = activity;
         calibrating = false;
         captureIndex = -1;
+        statusView = null;
         try {
-            if (overlayView != null && overlayView.getParent() instanceof ViewGroup) {
-                ((ViewGroup) overlayView.getParent()).removeView(overlayView);
+            Dialog d = dialog;
+            dialog = null;
+            if (d != null) {
+                d.dismiss();
             }
         } catch (Throwable ignored) {
         }
-        overlayView = null;
-        overlay = false;
+        Activity a = activity;
         if (a != null) {
             releaseAll(a);
         }

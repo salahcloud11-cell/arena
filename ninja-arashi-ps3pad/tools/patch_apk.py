@@ -79,6 +79,87 @@ def zip_entry_sha(apk, name):
 
 
 # --------------------------------------------------------------------- steps
+
+def _uleb128(buf, off):
+    result = 0
+    shift = 0
+    while True:
+        b = buf[off]
+        off += 1
+        result |= (b & 0x7f) << shift
+        if b < 0x80:
+            break
+        shift += 7
+    return result, off
+
+
+def dex_class_hierarchy(path):
+    """Minimal .dex reader: returns {class descriptor: superclass descriptor}.
+
+    Used to prove the shipped dex really has com.ps3mod.PS3Activity extending
+    the game's UnityPlayerActivity - a manifest alone does not guarantee that.
+    """
+    with open(path, "rb") as fh:
+        buf = fh.read()
+    if buf[:4] != b"dex\n":
+        raise ValueError("not a dex: " + path)
+    string_ids_size, string_ids_off = struct.unpack_from("<II", buf, 56)
+    type_ids_size, type_ids_off = struct.unpack_from("<II", buf, 64)
+    class_defs_size, class_defs_off = struct.unpack_from("<II", buf, 96)
+
+    strings = []
+    for i in range(string_ids_size):
+        data_off = struct.unpack_from("<I", buf, string_ids_off + 4 * i)[0]
+        start = data_off
+        while buf[start] != 0:
+            start += 1
+        raw = buf[data_off:start]
+        # MUTF-8 is close enough for ASCII descriptors
+        strings.append(raw.decode("utf-8", "replace"))
+
+    types = []
+    for i in range(type_ids_size):
+        idx = struct.unpack_from("<I", buf, type_ids_off + 4 * i)[0]
+        types.append(strings[idx])
+
+    out = {}
+    for i in range(class_defs_size):
+        base = class_defs_off + 32 * i
+        class_idx, _flags, super_idx = struct.unpack_from("<III", buf, base)
+        out[types[class_idx]] = types[super_idx] if super_idx != 0xFFFFFFFF else None
+    return out
+
+
+def check_dex_classes(apk):
+    """Fails the build if the mapper is not compiled into the game's dex, or if
+    the activity does not extend Unity's player activity."""
+    problems = []
+    tmp = "/tmp/_hierarchy.dex"
+    with zipfile.ZipFile(apk) as z:
+        with open(tmp, "wb") as fh:
+            fh.write(z.read("classes.dex"))
+    try:
+        h = dex_class_hierarchy(tmp)
+    except Exception as exc:                     # noqa: BLE001 - report, never crash
+        return ["could not read classes.dex: %s" % exc]
+    ours = sorted(k for k in h if k.startswith("Lcom/ps3mod/"))
+    log("    com/ps3mod classes in classes.dex: %s" % ", ".join(ours))
+    if "Lcom/ps3mod/PS3Activity;" not in h:
+        problems.append("com.ps3mod.PS3Activity is missing from classes.dex")
+    else:
+        sup = h["Lcom/ps3mod/PS3Activity;"]
+        log("    PS3Activity extends %s" % sup)
+        if sup != "Lcom/unity3d/player/UnityPlayerActivity;":
+            problems.append("PS3Activity does not extend UnityPlayerActivity (%s)" % sup)
+    if "Lcom/unity3d/player/UnityPlayerActivity;" not in h:
+        problems.append("the game's UnityPlayerActivity is missing from the dex")
+    if "Lcom/ps3mod/PS3Mapper;" not in h:
+        problems.append("com.ps3mod.PS3Mapper is missing from classes.dex")
+    if not problems:
+        log("    dex hierarchy OK: the mod's activity subclasses the game's activity")
+    return problems
+
+
 def report_dexes(apk, label):
     log("    %s dex method counts:" % label)
     with zipfile.ZipFile(apk) as z:
@@ -428,6 +509,7 @@ def verify(apk_out, orig_apk, build_tools):
             problems.append("package name changed in the rebuild")
         if "com.ps3mod.PS3Activity" not in badging:
             problems.append("launchable activity is not com.ps3mod.PS3Activity")
+        problems.extend(check_dex_classes(apk_out))
     except SystemExit:
         problems.append("aapt badging failed")
 
