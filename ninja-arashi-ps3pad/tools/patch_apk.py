@@ -166,6 +166,21 @@ def report_launcher(tree):
     # the launcher label is what the user sees on the home screen, so it has to
     # carry the build version: that makes "did the new APK install?" answerable
     # without opening anything.
+    # The launcher label on the activity is not enough: Pixel/AOSP launchers use
+    # it, but Samsung/MIUI/Xiaomi use the <application> label, which still said
+    # plain "Ninja Arashi".  That is exactly how "the icon name never changed"
+    # can happen with the new APK installed, so set both.
+    am = re.search(r"<application\b[^>]*>", xml, re.S)
+    if am:
+        tag = am.group(0)
+        if 'android:label=' in tag:
+            new_tag = re.sub(r'android:label="[^"]*"',
+                             'android:label="' + version_label + '"', tag, count=1)
+        else:
+            new_tag = tag[:-1] + ' android:label="' + version_label + '">'
+        xml = xml[:am.start()] + new_tag + xml[am.end():]
+        log("    application label set to: %s" % version_label)
+
     xml2, n = re.subn(r'android:versionName="[^"]*"',
                       'android:versionName="1.4-ps3v8"', xml, count=1)
     if n:
@@ -507,6 +522,8 @@ def verify(apk_out, orig_apk, build_tools, tree=None):
             problems.append("versionName was not set")
         if "Ninja Arashi PS3v8" not in badging:
             problems.append("the launcher label does not carry the version")
+        if "application-label:'Ninja Arashi PS3v8'" not in badging:
+            problems.append("the application label (home-screen name) does not carry the version")
         problems.extend(check_dex_classes(apk_out, build_tools))
     except SystemExit:
         problems.append("aapt badging failed")

@@ -8,6 +8,7 @@
 
     <application
         android:label="PS3 TEST v8"
+        android:icon="@android:drawable/ic_menu_manage"
         android:allowBackup="false"
         android:hardwareAccelerated="true">
 
