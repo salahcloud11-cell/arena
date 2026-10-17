@@ -88,7 +88,7 @@ def check_dex_classes(apk, build_tools=None):
     problems = []
     with zipfile.ZipFile(apk) as z:
         data = z.read("classes.dex")
-    for desc in (b"Lcom/ps3mod/PS3Mapper;",):
+    for desc in (b"Lcom/ps3mod/PS3Mapper;", b"Lcom/ps3mod/PS3BootActivity;"):
         if desc not in data:
             problems.append("%s is missing from classes.dex" % desc.decode())
     if not problems:
@@ -138,9 +138,33 @@ def report_launcher(tree):
             break
     if not launcher:
         raise SystemExit("no launcher activity found in the manifest")
-    log("    launcher activity: %s" % launcher)
-    if "com.ps3mod" in xml:
-        raise SystemExit("the manifest still references com.ps3mod - aborting")
+    log("    launcher activity (game): %s" % launcher)
+
+    # Make our diagnostic boot screen the launcher: it is drawn before Unity,
+    # so "is the mod installed and is the pad seen?" is answered visibly instead
+    # of guessing from inside the game.
+    boot = ('<activity android:name="com.ps3mod.PS3BootActivity"'
+            ' android:exported="true"'
+            ' android:screenOrientation="landscape"'
+            ' android:configChanges="orientation|screenSize|keyboardHidden"'
+            ' android:theme="@android:style/Theme.NoTitleBar.Fullscreen">'
+            '<intent-filter>'
+            '<action android:name="android.intent.action.MAIN"/>'
+            '<category android:name="android.intent.category.LAUNCHER"/>'
+            '</intent-filter>'
+            '</activity>')
+
+    # one launcher icon only: drop LAUNCHER from the Unity activity's own filter
+    xml = xml.replace('<category android:name="android.intent.category.LAUNCHER"/>', '')
+    if "com.ps3mod.PS3BootActivity" not in xml:
+        m = re.search(r"<application\b[^>]*>", xml)
+        if not m:
+            raise SystemExit("no <application> tag")
+        xml = xml[:m.end()] + boot + xml[m.end():]
+    open(path, "w", encoding="utf-8").write(xml)
+    log("    added com.ps3mod.PS3BootActivity as the launcher")
+    if "android.intent.category.LAUNCHER" not in xml:
+        raise SystemExit("the rebuild has no launcher activity")
     return launcher
 
 
@@ -424,8 +448,10 @@ def verify(apk_out, orig_apk, build_tools):
                 log("    " + line)
         if "com.blackpanther.ninjaarashi" not in badging:
             problems.append("package name changed in the rebuild")
-        if "com.ps3mod" in badging:
-            problems.append("the manifest must not reference com.ps3mod")
+        if "com.ps3mod.PS3BootActivity" not in badging:
+            problems.append("the boot activity is not in the manifest")
+        if "com.unity3d.player.UnityPlayerActivity" not in badging:
+            problems.append("the game's Unity activity disappeared from the manifest")
         problems.extend(check_dex_classes(apk_out, build_tools))
     except SystemExit:
         problems.append("aapt badging failed")

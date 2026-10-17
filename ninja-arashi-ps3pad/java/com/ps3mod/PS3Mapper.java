@@ -47,7 +47,7 @@ import android.widget.Toast;
 public class PS3Mapper {
 
     private static final String TAG = "PS3Mapper";
-    private static final String VER = "v4";
+    private static final String VER = "v5";
 
     /* ------------------------------------------------------------------ */
     /* functions                                                          */
