@@ -203,6 +203,30 @@ jobs:
             gh release view "$RELEASE_TAG"
           } 2>&1 | tee "$WORK/logs/release.log"
 
+      - name: Transfer copy into the repo (optional)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          FLAG="ninja-arashi-ps3pad/transfer/DO_UPLOAD"
+          APK="$WORK/ninja-arashi-1-4-ps3pad.apk"
+          echo "flag present: $([ -f "$FLAG" ] && echo yes || echo no)"
+          if [ ! -f "$FLAG" ] || [ ! -f "$APK" ]; then
+            echo "skipping transfer"
+            exit 0
+          fi
+          TARGET="ninja-arashi-ps3pad/transfer/ninja-arashi-1-4-ps3pad.apk"
+          mkdir -p "$(dirname "$TARGET")"
+          cp "$APK" "$TARGET"
+          sha256sum "$TARGET" > "$TARGET.sha256"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f "$TARGET" "$TARGET.sha256"
+          git commit -m "transfer: built APK ${GITHUB_SHA:0:8} [skip ci]" || echo "nothing to commit"
+          git push || echo "WARNING: could not push the transfer copy"
+          ls -la "$TARGET"
+
       - name: Report (status + log tails)
         if: always()
         env:

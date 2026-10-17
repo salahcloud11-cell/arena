@@ -77,6 +77,22 @@ public class PS3BootActivity extends Activity {
         });
         col.addView(start);
 
+        Button calib = new Button(this);
+        calib.setText("🎮 معايرة الأزرار + تجربة اليد هنا");
+        calib.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
+        calib.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                try {
+                    PS3Mapper.attach(PS3BootActivity.this);
+                    PS3Mapper.openCalibration(PS3BootActivity.this);
+                    live("فتحت المعايرة — اضغط زر فاليد: خاصك تشوف الكود وكتبدل اللوحة.");
+                } catch (Throwable t) {
+                    live("ما قدرتش نفتح المعايرة: " + t);
+                }
+            }
+        });
+        col.addView(calib);
+
         Button startPlain = new Button(this);
         startPlain.setText("بدء اللعبة بلا مود (تشخيص)");
         startPlain.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f);
@@ -184,6 +200,10 @@ public class PS3BootActivity extends Activity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         try {
+            PS3Mapper.onKey(this, event);
+        } catch (Throwable ignored) {
+        }
+        try {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 String code = KeyEvent.keyCodeToString(event.getKeyCode());
                 InputDevice d = event.getDevice();
@@ -200,6 +220,10 @@ public class PS3BootActivity extends Activity {
 
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        try {
+            PS3Mapper.onMotion(this, event);
+        } catch (Throwable ignored) {
+        }
         try {
             if (event.getAction() == MotionEvent.ACTION_MOVE) {
                 live("العصا: X=" + String.format("%.2f", event.getAxisValue(MotionEvent.AXIS_X))

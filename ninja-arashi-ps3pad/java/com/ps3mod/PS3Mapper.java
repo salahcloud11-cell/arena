@@ -47,7 +47,7 @@ import android.widget.Toast;
 public class PS3Mapper {
 
     private static final String TAG = "PS3Mapper";
-    private static final String VER = "v5";
+    private static final String VER = "v6";
 
     /* ------------------------------------------------------------------ */
     /* functions                                                          */
@@ -309,6 +309,18 @@ public class PS3Mapper {
     }
 
     public static void showCalibrationPublic() {
+        showCalibration();
+    }
+
+    /** Opens calibration on any activity (used by the boot screen). */
+    public static void openCalibration(Activity a) {
+        if (a == null) {
+            return;
+        }
+        activity = a;
+        loadPositions(a);
+        calibrated(a);          /* touch the prefs so defaults are loaded */
+        autoOpened = true;      /* do not auto-open twice */
         showCalibration();
     }
 
