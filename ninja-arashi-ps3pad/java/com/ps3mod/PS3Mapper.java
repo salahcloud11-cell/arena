@@ -379,7 +379,12 @@ public class PS3Mapper {
         if (a == null || inputManager == null) {
             return;
         }
-        int[] ids = (int[]) mGetIds.invoke(inputManager);
+        int[] ids;
+        try {
+            ids = (int[]) mGetIds.invoke(inputManager);
+        } catch (Throwable t) {
+            return;
+        }
         if (ids == null) {
             return;
         }
