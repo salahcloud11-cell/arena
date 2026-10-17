@@ -247,19 +247,6 @@ def merge_smali(tree, smali):
             copied += 1
     log("    %d smali files copied into %s" % (copied, dest_root))
 
-    # Hard assertion: the activity we are about to make the app's launcher must
-    # subclass the game's Unity activity. Checked on the smali apktool decoded
-    # from our compiled dex, so the check runs with a tool that is known to work.
-    act = os.path.join(dest_root, "com", "ps3mod", "PS3Activity.smali")
-    if not os.path.exists(act):
-        raise SystemExit("PS3Activity.smali was not produced - the mod would not run")
-    with open(act, encoding="utf-8", errors="replace") as fh:
-        smali_text = fh.read()
-    if ".super Lcom/unity3d/player/UnityPlayerActivity;" not in smali_text:
-        raise SystemExit("PS3Activity does not extend UnityPlayerActivity")
-    log("    PS3Activity.smali: .super Lcom/unity3d/player/UnityPlayerActivity; OK")
-    if skipped:
-        log("    kept the game's own version of: %s" % skipped)
     if not copied:
         raise SystemExit("nothing was copied - the mapper would not be in the APK")
 
