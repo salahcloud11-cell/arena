@@ -190,6 +190,13 @@ def inject(lines, method_name, param_desc, hook_name, label, class_desc, super_d
 
 def hook(tree, super_desc_override=None):
     path, class_desc, name = find_activity_smali(tree)
+
+    # keep the pristine file: the build step restores it if the rebuild fails
+    try:
+        import shutil
+        shutil.copyfile(path, path + ".orig")
+    except Exception:                            # noqa: BLE001
+        pass
     with open(path, encoding="utf-8") as fh:
         lines = fh.read().split("\n")
 

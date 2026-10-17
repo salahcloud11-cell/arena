@@ -529,6 +529,8 @@ def main():
                     % (hook_name, param_desc)) not in text:
                 raise SystemExit("%s was not hooked into %s" % (method_name, rel))
         log("    all three dispatch methods call the mapper")
+        log("    each call is wrapped in try/catch(Throwable): if the mapper class")
+        log("    is missing or throws, the game's own dispatch runs unchanged.")
     unsig = os.path.join(a.work, "unsigned.apk")
     if "build" not in skip:
         strip_old_signature(tree)
