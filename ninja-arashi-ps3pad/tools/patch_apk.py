@@ -110,12 +110,13 @@ def dex_class_hierarchy(path):
     strings = []
     for i in range(string_ids_size):
         data_off = struct.unpack_from("<I", buf, string_ids_off + 4 * i)[0]
-        start = data_off
-        while buf[start] != 0:
-            start += 1
-        raw = buf[data_off:start]
+        # string_data_item: uleb128 utf16 length, then the bytes, then a NUL
+        start, _ = _uleb128(buf, data_off)
+        end = start
+        while buf[end] != 0:
+            end += 1
         # MUTF-8 is close enough for ASCII descriptors
-        strings.append(raw.decode("utf-8", "replace"))
+        strings.append(buf[start:end].decode("utf-8", "replace"))
 
     types = []
     for i in range(type_ids_size):
@@ -142,6 +143,8 @@ def check_dex_classes(apk):
         h = dex_class_hierarchy(tmp)
     except Exception as exc:                     # noqa: BLE001 - report, never crash
         return ["could not read classes.dex: %s" % exc]
+    if not h:
+        return ["could not parse any class from classes.dex (parser problem)"]
     ours = sorted(k for k in h if k.startswith("Lcom/ps3mod/"))
     log("    com/ps3mod classes in classes.dex: %s" % ", ".join(ours))
     if "Lcom/ps3mod/PS3Activity;" not in h:
