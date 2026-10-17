@@ -21,6 +21,7 @@ on:
       - ".github/workflows/ninja-arashi-ps3.yml"
       - "!ninja-arashi-ps3pad/**/*.md"
       - "!ninja-arashi-ps3pad/**/*.sha256"
+      - "!ninja-arashi-ps3pad/signing/**"
   workflow_dispatch:
     inputs:
       drive_file_id:
@@ -66,6 +67,34 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Persistent signing key
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK/logs"
+          KEY="ninja-arashi-ps3pad/signing/ps3mod.keystore"
+          if [ -f "$KEY" ]; then
+            {
+              echo "using the committed keystore ($(stat -c%s "$KEY") bytes)"
+              keytool -list -keystore "$KEY" -storepass ps3mod | head -n 5
+            } 2>&1 | tee -a "$WORK/logs/signing.log" || true
+          else
+            {
+              echo "no committed keystore - creating one and committing it so every"
+              echo "future build keeps the same signature (so updates install over)"
+              mkdir -p "$(dirname "$KEY")"
+              keytool -genkeypair -keystore "$KEY" -alias ps3mod \
+                -storepass ps3mod -keypass ps3mod -keyalg RSA -keysize 2048 \
+                -validity 10950 -dname "CN=ps3pad, O=ps3pad"
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git add "$KEY"
+              git commit -m "signing: add the persistent mod keystore [skip ci]"
+              git push || echo "WARNING: could not push the keystore (build continues, signature will differ next run)"
+            } 2>&1 | tee -a "$WORK/logs/signing.log"
+          fi
+          mkdir -p "$WORK/keys"
+          cp "$KEY" "$WORK/keys/ps3mod.keystore"
 
       - name: Prepare Android SDK
         run: |
@@ -187,7 +216,7 @@ jobs:
             echo
             echo "Commit \`${GITHUB_SHA:0:8}\` - [run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
             echo
-            for f in patch sdk tools download release; do
+            for f in patch signing sdk tools download release; do
               if [ -f "$WORK/logs/$f.log" ]; then
                 echo "<details><summary>$f.log</summary>"
                 echo

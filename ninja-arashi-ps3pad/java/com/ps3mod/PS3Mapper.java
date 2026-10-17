@@ -47,7 +47,7 @@ import android.widget.Toast;
 public class PS3Mapper {
 
     private static final String TAG = "PS3Mapper";
-    private static final String VER = "v3";
+    private static final String VER = "v4";
 
     /* ------------------------------------------------------------------ */
     /* functions                                                          */
@@ -127,34 +127,6 @@ public class PS3Mapper {
         }
         activity = a;
         loadPositions(a);
-    }
-
-    /** Called from PS3Activity.onCreate: proves the mod is loaded. */
-    public static void onActivityCreated(final Activity a) {
-        attach(a);
-        Log.i(TAG, "PS3 mod " + VER + " loaded");
-        handler().postDelayed(new Runnable() {
-            public void run() {
-                toast(a, "PS3 mod " + VER + " شغال", Toast.LENGTH_SHORT);
-            }
-        }, 700L);
-    }
-
-    /** Called from PS3Activity.onResume. */
-    public static void onActivityResumed(final Activity a) {
-        attach(a);
-        handler().postDelayed(new Runnable() {
-            public void run() {
-                reportPadStatus(a);
-            }
-        }, 1500L);
-        if (!calibrated(a)) {
-            handler().postDelayed(new Runnable() {
-                public void run() {
-                    showCalibration();
-                }
-            }, 1200L);
-        }
     }
 
     private static int countPads() {
@@ -260,6 +232,76 @@ public class PS3Mapper {
         } catch (Throwable t) {
             return false;
         }
+    }
+
+    /**
+     * Called from the hooked dispatchTouchEvent of the game's own activity.
+     * Returns true only for touches the mapper handled itself (the calibration
+     * entry tap and the three-corner-tap shortcut); everything else goes to the
+     * game untouched.
+     */
+    public static boolean onTouch(Activity a, MotionEvent ev) {
+        try {
+            if (a == null || ev == null) {
+                return false;
+            }
+            if (activity != a) {
+                attach(a);
+            }
+            if (ev.getActionMasked() != MotionEvent.ACTION_DOWN) {
+                return false;
+            }
+            alive(a);
+            if (!calibrated(a) && !autoOpened) {
+                /* No pad involved: the first touch proves the mod is in control,
+                 * so use it to open calibration. */
+                autoOpened = true;
+                showCalibration();
+                return true;
+            }
+            return cornerTap(a, ev);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static void alive(Activity a) {
+        if (connectedToast) {
+            return;
+        }
+        connectedToast = true;
+        toast(a, "PS3 mod " + VER + " شغال ✓", Toast.LENGTH_SHORT);
+        int pads = countPads();
+        toast(a, pads == 0
+                ? "ما كايناش يد متصلة — وصّل الـ PS3"
+                : "اليد متصلة ✓ (" + pads + ") — اضغط أي زر فاليد", Toast.LENGTH_LONG);
+        updateStatus(null, -1);
+    }
+
+    private static final long CORNER_TAP_WINDOW = 2500L;
+    private static final float CORNER_FRACTION = 0.14f;
+    private static int cornerCount = 0;
+    private static long cornerFirst = 0L;
+
+    private static boolean cornerTap(Activity a, MotionEvent ev) {
+        float w = viewW(a);
+        float h = viewH(a);
+        if (ev.getX() > w * CORNER_FRACTION || ev.getY() > h * CORNER_FRACTION) {
+            return false;
+        }
+        long now = SystemClock.uptimeMillis();
+        if (cornerCount == 0 || now - cornerFirst > CORNER_TAP_WINDOW) {
+            cornerCount = 1;
+            cornerFirst = now;
+        } else {
+            cornerCount++;
+        }
+        if (cornerCount >= 3) {
+            cornerCount = 0;
+            showCalibration();
+            return true;
+        }
+        return false;
     }
 
     public static boolean isCalibrating() {

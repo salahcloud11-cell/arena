@@ -31,6 +31,9 @@ import subprocess
 import sys
 import zipfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hook_smali  # noqa: E402
+
 KEY_ALIAS = "ps3mod"
 KS_PASS = "ps3mod"
 KEYSTORE_PASS = "ps3mod"
@@ -85,13 +88,11 @@ def check_dex_classes(apk, build_tools=None):
     problems = []
     with zipfile.ZipFile(apk) as z:
         data = z.read("classes.dex")
-    for desc in (b"Lcom/ps3mod/PS3Activity;", b"Lcom/ps3mod/PS3Mapper;",
-                 b"Lcom/unity3d/player/UnityPlayerActivity;"):
+    for desc in (b"Lcom/ps3mod/PS3Mapper;",):
         if desc not in data:
             problems.append("%s is missing from classes.dex" % desc.decode())
     if not problems:
-        log("    classes.dex contains PS3Activity, PS3Mapper and the game's "
-            "UnityPlayerActivity")
+        log("    classes.dex contains com.ps3mod.PS3Mapper")
     return problems
 
 
@@ -120,46 +121,29 @@ def decode(apktool, java, apk_in, tree):
     run([java, "-Xmx3g", "-jar", apktool, "d", "-f", "-o", tree, apk_in])
 
 
-def patch_manifest(tree):
-    log("== 2. pointing the game's activity at com.ps3mod.PS3Activity")
+def report_launcher(tree):
+    """Find the activity the system will launch; it is the one we hook.
+
+    The activity is NOT renamed and no Application class is injected: the game's
+    own activity keeps its name, and the mapper is called from inside its smali.
+    That is the mechanism the working Granny/CoD mods used.
+    """
+    log("== 2. locating the game's launcher activity")
     path = os.path.join(tree, "AndroidManifest.xml")
     xml = open(path, encoding="utf-8").read()
+    launcher = None
+    for m in re.finditer(r"<activity\b[^>]*?android:name=\"([^\"]+)\"(.*?)</activity>", xml, re.S):
+        if "android.intent.action.MAIN" in m.group(2) and "android.intent.category.LAUNCHER" in m.group(2):
+            launcher = m.group(1)
+            break
+    if not launcher:
+        raise SystemExit("no launcher activity found in the manifest")
+    log("    launcher activity: %s" % launcher)
+    if "com.ps3mod" in xml:
+        raise SystemExit("the manifest still references com.ps3mod - aborting")
+    return launcher
 
-    new_name = "com.ps3mod.PS3Activity"
-    unity = "com.unity3d.player.UnityPlayerActivity"
-    marker = 'android:name="' + new_name + '"'
 
-    # The first build injected an Application class; that path is gone (Unity's
-    # activity bypasses the window callback), so drop it again if present, and
-    # never touch a real Application class the game may have.
-    if 'android:name="com.ps3mod.PS3App"' in xml:
-        xml = xml.replace(' android:name="com.ps3mod.PS3App"', "")
-        log("    removed the old com.ps3mod.PS3App attribute")
-
-    if marker in xml:
-        log("    already pointing at PS3Activity")
-        open(path, "w", encoding="utf-8").write(xml)
-        return
-
-    # Only rename the Unity activity element itself, keep all its attributes and
-    # children (intent filters, meta-data) untouched.
-    pattern = '(<activity\\b[^>]*?)android:name="' + unity + '"'
-    new_xml, n = re.subn(pattern, r'\1android:name="' + new_name + '"', xml, count=1)
-    if not n:
-        # Some builds use a game-specific subclass; find the launcher activity
-        # (the first <activity> with a MAIN/LAUNCHER filter is usually it, but a
-        # name match on anything ending in UnityPlayerActivity is close enough).
-        m = re.search(r'<activity\\b[^>]*?android:name="([^"]*UnityPlayerActivity[^"]*)"', xml)
-        if not m:
-            raise SystemExit("could not find a Unity player activity to subclass")
-        log("    NOTE: the game uses %s, renaming that one" % m.group(1))
-        new_xml, n = re.subn(re.escape(m.group(1)), new_name, xml, count=1)
-    xml = new_xml
-    open(path, "w", encoding="utf-8").write(xml)
-    log('    android:name="%s" -> "%s"' % (unity, new_name))
-    # a leftover <activity-alias> pointing at the old class would still launch it
-    if "activity-alias" in xml and unity in xml:
-        log("    WARNING: the manifest still mentions %s (activity-alias?)" % unity)
 def jdk_tool(java, name):
     """javac/keytool live next to the java binary when a JDK path is used."""
     folder = os.path.dirname(java or "")
@@ -454,8 +438,8 @@ def verify(apk_out, orig_apk, build_tools):
                 log("    " + line)
         if "com.blackpanther.ninjaarashi" not in badging:
             problems.append("package name changed in the rebuild")
-        if "com.ps3mod.PS3Activity" not in badging:
-            problems.append("launchable activity is not com.ps3mod.PS3Activity")
+        if "com.ps3mod" in badging:
+            problems.append("the manifest must not reference com.ps3mod")
         problems.extend(check_dex_classes(apk_out, build_tools))
     except SystemExit:
         problems.append("aapt badging failed")
@@ -490,12 +474,36 @@ def main():
     if "decode" not in skip:
         decode(a.apktool, a.java, a.apk_in, tree)
     if "manifest" not in skip:
-        patch_manifest(tree)
-    dex = (java_compile(a.java_src, a.work, a.java, a.android_jar, a.build_tools, a.java_stub)
+        report_launcher(tree)
+    dex = (java_compile(a.java_src, a.work, a.java, a.android_jar, a.build_tools, None)
            if "java" not in skip else None)
     if "smali" not in skip:
         smali = dex_to_smali(a.apktool, a.java, a.work, dex, a.apk_in)
         merge_smali(tree, smali)
+
+    if "hook" not in skip:
+        log("== 5c. hooking the game's activity (smali)")
+        name, desc, rel, sup, results = hook_smali.hook(tree)
+        log("    %s (%s), superclass %s" % (name, desc, sup))
+        log("    file: %s" % rel)
+        bad = False
+        for method, status in results:
+            log("      %-28s %s" % (method, status))
+            if status.startswith("skipped"):
+                bad = True
+            if status not in ("hooked", "added", "already hooked"):
+                bad = True
+        if bad:
+            raise SystemExit("could not hook every dispatch method - refusing to ship")
+
+        # assert the calls really are in the file
+        with open(os.path.join(tree, rel), encoding="utf-8") as fh:
+            text = fh.read()
+        for method_name, param_desc, hook_name, _label in hook_smali.HOOKS:
+            if ("Lcom/ps3mod/PS3Mapper;->%s(Landroid/app/Activity;%s)Z"
+                    % (hook_name, param_desc)) not in text:
+                raise SystemExit("%s was not hooked into %s" % (method_name, rel))
+        log("    all three dispatch methods call the mapper")
     unsig = os.path.join(a.work, "unsigned.apk")
     if "build" not in skip:
         strip_old_signature(tree)
