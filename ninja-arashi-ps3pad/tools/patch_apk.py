@@ -105,25 +105,45 @@ def decode(apktool, java, apk_in, tree):
 
 
 def patch_manifest(tree):
-    log("== 2. adding the Application class to AndroidManifest.xml")
+    log("== 2. pointing the game's activity at com.ps3mod.PS3Activity")
     path = os.path.join(tree, "AndroidManifest.xml")
     xml = open(path, encoding="utf-8").read()
-    marker = 'com.ps3mod.PS3App'
-    injected = 'android:name="' + marker + '"'
-    if injected in xml:
-        log("    already present")
+
+    new_name = "com.ps3mod.PS3Activity"
+    unity = "com.unity3d.player.UnityPlayerActivity"
+    marker = 'android:name="' + new_name + '"'
+
+    # The first build injected an Application class; that path is gone (Unity's
+    # activity bypasses the window callback), so drop it again if present, and
+    # never touch a real Application class the game may have.
+    if 'android:name="com.ps3mod.PS3App"' in xml:
+        xml = xml.replace(' android:name="com.ps3mod.PS3App"', "")
+        log("    removed the old com.ps3mod.PS3App attribute")
+
+    if marker in xml:
+        log("    already pointing at PS3Activity")
+        open(path, "w", encoding="utf-8").write(xml)
         return
-    old = re.search('<application[^>]*?android:name="([^"]*)"', xml)
-    if old:
-        log("    NOTE: original Application class was %s (replaced)" % old.group(1))
-        xml = re.sub('<application[^>]*?\\s+android:name="[^"]*"', '<application', xml, count=1)
-    new, n = re.subn('<application', '<application ' + injected, xml, count=1)
+
+    # Only rename the Unity activity element itself, keep all its attributes and
+    # children (intent filters, meta-data) untouched.
+    pattern = '(<activity\\b[^>]*?)android:name="' + unity + '"'
+    new_xml, n = re.subn(pattern, r'\1android:name="' + new_name + '"', xml, count=1)
     if not n:
-        raise SystemExit("could not find the <application> tag")
-    open(path, "w", encoding="utf-8").write(new)
-    log("    " + injected + " injected")
-
-
+        # Some builds use a game-specific subclass; find the launcher activity
+        # (the first <activity> with a MAIN/LAUNCHER filter is usually it, but a
+        # name match on anything ending in UnityPlayerActivity is close enough).
+        m = re.search(r'<activity\\b[^>]*?android:name="([^"]*UnityPlayerActivity[^"]*)"', xml)
+        if not m:
+            raise SystemExit("could not find a Unity player activity to subclass")
+        log("    NOTE: the game uses %s, renaming that one" % m.group(1))
+        new_xml, n = re.subn(re.escape(m.group(1)), new_name, xml, count=1)
+    xml = new_xml
+    open(path, "w", encoding="utf-8").write(xml)
+    log('    android:name="%s" -> "%s"' % (unity, new_name))
+    # a leftover <activity-alias> pointing at the old class would still launch it
+    if "activity-alias" in xml and unity in xml:
+        log("    WARNING: the manifest still mentions %s (activity-alias?)" % unity)
 def jdk_tool(java, name):
     """javac/keytool live next to the java binary when a JDK path is used."""
     folder = os.path.dirname(java or "")
@@ -134,7 +154,7 @@ def jdk_tool(java, name):
     return name
 
 
-def java_compile(java_src_dir, work, java, android_jar, build_tools):
+def java_compile(java_src_dir, work, java, android_jar, build_tools, stub_dir=None):
     log("== 3. compiling the mapper (javac + d8)")
     classes = os.path.join(work, "classes")
     dexdir = os.path.join(work, "dex")
@@ -143,10 +163,13 @@ def java_compile(java_src_dir, work, java, android_jar, build_tools):
             shutil.rmtree(d)
         os.makedirs(d)
     sources = []
-    for root, _, files in os.walk(java_src_dir):
-        for f in files:
-            if f.endswith(".java"):
-                sources.append(os.path.join(root, f))
+    for folder in (java_src_dir, stub_dir):
+        if not folder or not os.path.isdir(folder):
+            continue
+        for root, _, files in os.walk(folder):
+            for f in files:
+                if f.endswith(".java"):
+                    sources.append(os.path.join(root, f))
     if not sources:
         raise SystemExit("no java sources found in " + java_src_dir)
     javac = jdk_tool(java, "javac")
@@ -206,6 +229,7 @@ def merge_smali(tree, smali):
     log("== 5. merging the mapper into the game's smali tree")
     dest_root = os.path.join(tree, "smali")
     copied = 0
+    skipped = []
     for root, _, files in os.walk(smali):
         for f in files:
             if not f.endswith(".smali"):
@@ -213,10 +237,17 @@ def merge_smali(tree, smali):
             src = os.path.join(root, f)
             rel = os.path.relpath(src, smali)
             dst = os.path.join(dest_root, rel)
+            if os.path.exists(dst):
+                # a class the game already ships (the Unity activity stub):
+                # the game's version must win, never ours
+                skipped.append(rel)
+                continue
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copyfile(src, dst)
             copied += 1
     log("    %d smali files copied into %s" % (copied, dest_root))
+    if skipped:
+        log("    kept the game's own version of: %s" % skipped)
     if not copied:
         raise SystemExit("nothing was copied - the mapper would not be in the APK")
 
@@ -394,6 +425,8 @@ def verify(apk_out, orig_apk, build_tools):
                 log("    " + line)
         if "com.blackpanther.ninjaarashi" not in badging:
             problems.append("package name changed in the rebuild")
+        if "com.ps3mod.PS3Activity" not in badging:
+            problems.append("launchable activity is not com.ps3mod.PS3Activity")
     except SystemExit:
         problems.append("aapt badging failed")
 
@@ -408,6 +441,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apk-in", required=True)
     ap.add_argument("--java-src", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "java"))
+    ap.add_argument("--java-stub", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "java_stub"))
     ap.add_argument("--apktool", required=True)
     ap.add_argument("--android-jar", required=True)
     ap.add_argument("--build-tools", required=True)
@@ -427,7 +461,8 @@ def main():
         decode(a.apktool, a.java, a.apk_in, tree)
     if "manifest" not in skip:
         patch_manifest(tree)
-    dex = java_compile(a.java_src, a.work, a.java, a.android_jar, a.build_tools) if "java" not in skip else None
+    dex = (java_compile(a.java_src, a.work, a.java, a.android_jar, a.build_tools, a.java_stub)
+           if "java" not in skip else None)
     if "smali" not in skip:
         smali = dex_to_smali(a.apktool, a.java, a.work, dex, a.apk_in)
         merge_smali(tree, smali)
