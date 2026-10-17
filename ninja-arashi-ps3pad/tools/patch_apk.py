@@ -170,7 +170,18 @@ def report_launcher(tree):
                       'android:versionName="1.4-ps3v7"', xml, count=1)
     if n:
         xml = xml2
-        log("    versionName set to 1.4-ps3v7")
+        log("    versionName set to 1.4-ps3v7 in the manifest")
+
+    # apktool rebuilds versionName from apktool.yml, which overrides the manifest
+    yml_path = os.path.join(tree, "apktool.yml")
+    if os.path.exists(yml_path):
+        yml = open(yml_path, encoding="utf-8").read()
+        if re.search(r"^\s*versionName:", yml, re.M):
+            yml = re.sub(r"^(\s*versionName:\s*).*$", r"\g<1>1.4-ps3v7", yml, count=1, flags=re.M)
+        else:
+            yml = yml.replace("versionInfo:", "versionInfo:\n  versionName: 1.4-ps3v7", 1)
+        open(yml_path, "w", encoding="utf-8").write(yml)
+        log("    versionName set to 1.4-ps3v7 in apktool.yml")
     open(path, "w", encoding="utf-8").write(xml)
     log("    added com.ps3mod.PS3BootActivity as the launcher (label: %s)"
         % version_label)
