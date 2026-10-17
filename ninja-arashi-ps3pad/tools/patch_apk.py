@@ -569,7 +569,7 @@ def main():
         # assert the calls really are in the file
         with open(os.path.join(tree, rel), encoding="utf-8") as fh:
             text = fh.read()
-        for method_name, param_desc, hook_name, _label in hook_smali.HOOKS:
+        for method_name, param_desc, hook_name, _label, _retbool in hook_smali.HOOKS:
             if ("Lcom/ps3mod/PS3Mapper;->%s(Landroid/app/Activity;%s)Z"
                     % (hook_name, param_desc)) not in text:
                 raise SystemExit("%s was not hooked into %s" % (method_name, rel))
