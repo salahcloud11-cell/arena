@@ -47,7 +47,7 @@ import android.widget.Toast;
 public class PS3Mapper {
 
     private static final String TAG = "PS3Mapper";
-    private static final String VER = "v6";
+    private static final String VER = "v7";
 
     /* ------------------------------------------------------------------ */
     /* functions                                                          */
@@ -114,6 +114,20 @@ public class PS3Mapper {
     private static boolean leftHeld = false, rightHeld = false, joyHeld = false;
 
     private static long lastPadEvent = 0L;
+    private static volatile boolean polling = false;
+    private static Object inputManager = null;
+    private static java.lang.reflect.Method mGetIds = null;
+    private static java.lang.reflect.Method mGetKeyState = null;
+    private static final boolean[] pollKeys = new boolean[16];
+    private static final int[] POLL_CODES = {
+            KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_BUTTON_B,
+            KeyEvent.KEYCODE_BUTTON_X, KeyEvent.KEYCODE_BUTTON_Y,
+            KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1,
+            KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BACK,
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_BUTTON_L2, KeyEvent.KEYCODE_BUTTON_R2,
+            KeyEvent.KEYCODE_BUTTON_SELECT, KeyEvent.KEYCODE_BUTTON_THUMBL};
     private static boolean connectedToast = false;
     private static boolean autoOpened = false;
     private static long l3Down = 0L, r3Down = 0L;
@@ -252,6 +266,7 @@ public class PS3Mapper {
                 return false;
             }
             alive(a);
+            startPolling();
             if (!calibrated(a) && !autoOpened) {
                 /* No pad involved: the first touch proves the mod is in control,
                  * so use it to open calibration. */
@@ -302,6 +317,176 @@ public class PS3Mapper {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Called from the hooked onCreate/onResume of the game's activity.
+     *
+     * Starts the polling reader. Reading the pad through InputManager works even
+     * when every key/motion event is swallowed by Unity, which is the one thing
+     * that could never be confirmed from here without a device.
+     */
+    public static void onGameActivity(Activity a) {
+        if (a == null) {
+            return;
+        }
+        attach(a);
+        alive(a);
+        startPolling();
+    }
+
+    private static void startPolling() {
+        if (polling) {
+            return;
+        }
+        polling = true;
+        Thread t = new Thread(new Runnable() {
+            public void run() {
+                try {
+                    Class<?> im = Class.forName("android.hardware.input.InputManager");
+                    Object mgr = im.getMethod("getInstance").invoke(null);
+                    java.lang.reflect.Method ids = im.getMethod("getInputDeviceIds");
+                    java.lang.reflect.Method state = im.getMethod("getKeyCodeState",
+                            int.class, int.class, int.class);
+                    inputManager = mgr;
+                    mGetIds = ids;
+                    mGetKeyState = state;
+                    Log.i(TAG, "polling reader started");
+                } catch (Throwable t2) {
+                    polling = false;
+                    Log.w(TAG, "polling reader unavailable", t2);
+                    return;
+                }
+                while (polling) {
+                    try {
+                        pollOnce();
+                    } catch (Throwable ignored) {
+                    }
+                    try {
+                        Thread.sleep(16L);
+                    } catch (InterruptedException ie) {
+                        return;
+                    }
+                }
+            }
+        });
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static void pollOnce() {
+        final Activity a = activity;
+        if (a == null || inputManager == null) {
+            return;
+        }
+        int[] ids = (int[]) mGetIds.invoke(inputManager);
+        if (ids == null) {
+            return;
+        }
+        boolean[] now = new boolean[POLL_CODES.length];
+        boolean found = false;
+        for (int id : ids) {
+            InputDevice d = null;
+            try {
+                d = InputDevice.getDevice(id);
+            } catch (Throwable ignored) {
+            }
+            if (d == null) {
+                continue;
+            }
+            int src = d.getSources();
+            if ((src & InputDevice.SOURCE_GAMEPAD) != InputDevice.SOURCE_GAMEPAD
+                    && (src & InputDevice.SOURCE_JOYSTICK) != InputDevice.SOURCE_JOYSTICK) {
+                continue;
+            }
+            found = true;
+            for (int k = 0; k < POLL_CODES.length; k++) {
+                try {
+                    int st = (Integer) mGetKeyState.invoke(inputManager, id, 0xffffff,
+                            POLL_CODES[k]);
+                    if (st != 0) {
+                        now[k] = true;
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        if (!found) {
+            return;
+        }
+        /* Digital key state, independent of event delivery. */
+        for (int k = 0; k < POLL_CODES.length; k++) {
+            if (now[k] == pollKeys[k]) {
+                continue;
+            }
+            pollKeys[k] = now[k];
+            final int code = POLL_CODES[k];
+            final boolean down = now[k];
+            handler().post(new Runnable() {
+                public void run() {
+                    pollKey(a, code, down);
+                }
+            });
+        }
+    }
+
+    /** Applies a polled key transition through the same handlers events use. */
+    private static void pollKey(Activity a, int code, boolean down) {
+        try {
+            if (activity == null) {
+                activity = a;
+                loadPositions(a);
+            }
+            /* If real events are arriving, they are authoritative - do not double
+             * up on the same press. */
+            if (SystemClock.uptimeMillis() - lastPadEvent < 2000L) {
+                return;
+            }
+            if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_BUTTON_SELECT) {
+                if (down && !calibrating) {
+                    showCalibration();
+                }
+                return;
+            }
+            if (calibrating) {
+                return;
+            }
+            if (isDpad(code)) {
+                if (code == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    dLeft = down;
+                } else if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    dRight = down;
+                } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
+                    dUp = down;
+                } else {
+                    dDown = down;
+                }
+                if (code == KeyEvent.KEYCODE_DPAD_UP) {
+                    if (down) {
+                        pressFunc(a, F_JUMP);
+                    } else {
+                        releaseFunc(a, F_JUMP);
+                    }
+                }
+                updateMove(a);
+                return;
+            }
+            int f = functionFor(code);
+            if (f < 0) {
+                return;
+            }
+            if (down) {
+                if (HOLD[f]) {
+                    pressFunc(a, f);
+                } else {
+                    tapFunc(a, f);
+                }
+            } else if (HOLD[f]) {
+                releaseFunc(a, f);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "pollKey failed", t);
+        }
     }
 
     public static boolean isCalibrating() {

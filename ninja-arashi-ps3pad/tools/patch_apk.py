@@ -143,8 +143,10 @@ def report_launcher(tree):
     # Make our diagnostic boot screen the launcher: it is drawn before Unity,
     # so "is the mod installed and is the pad seen?" is answered visibly instead
     # of guessing from inside the game.
+    version_label = "Ninja Arashi PS3v7"
     boot = ('<activity android:name="com.ps3mod.PS3BootActivity"'
             ' android:exported="true"'
+            ' android:label="' + version_label + '"'
             ' android:screenOrientation="landscape"'
             ' android:configChanges="orientation|screenSize|keyboardHidden"'
             ' android:theme="@android:style/Theme.NoTitleBar.Fullscreen">'
@@ -161,8 +163,17 @@ def report_launcher(tree):
         if not m:
             raise SystemExit("no <application> tag")
         xml = xml[:m.end()] + boot + xml[m.end():]
+    # the launcher label is what the user sees on the home screen, so it has to
+    # carry the build version: that makes "did the new APK install?" answerable
+    # without opening anything.
+    xml2, n = re.subn(r'android:versionName="[^"]*"',
+                      'android:versionName="1.4-ps3v7"', xml, count=1)
+    if n:
+        xml = xml2
+        log("    versionName set to 1.4-ps3v7")
     open(path, "w", encoding="utf-8").write(xml)
-    log("    added com.ps3mod.PS3BootActivity as the launcher")
+    log("    added com.ps3mod.PS3BootActivity as the launcher (label: %s)"
+        % version_label)
     if "android.intent.category.LAUNCHER" not in xml:
         raise SystemExit("the rebuild has no launcher activity")
     return launcher
@@ -352,6 +363,36 @@ def sign(build_tools, java, keydir, apk_in, apk_out):
     return apk_out
 
 
+def selfcheck_shipped(apk_out, apktool, java, work):
+    """Decode the SIGNED apk and confirm the mapper really is wired in.
+
+    Everything up to here works on intermediate files; this checks the artifact
+    the user installs, which is the only thing that matters.
+    """
+    out = os.path.join(work, "selfcheck")
+    if os.path.isdir(out):
+        shutil.rmtree(out)
+    try:
+        run([java, "-Xmx2g", "-jar", apktool, "d", "-f", "-s", "-o", out, apk_out],
+            check=False)
+    except Exception:                            # noqa: BLE001
+        return []
+    found = {}
+    for root, _, files in os.walk(out):
+        for f in files:
+            if f == "UnityPlayerActivity.smali":
+                text = open(os.path.join(root, f), encoding="utf-8", errors="replace").read()
+                for call in ("onKey", "onMotion", "onTouch", "onGameActivity"):
+                    if "Lcom/ps3mod/PS3Mapper;->" + call in text:
+                        found[call] = True
+    for call in ("onKey", "onMotion", "onTouch", "onGameActivity"):
+        log("    shipped APK: %-14s %s" % (call, "wired" if found.get(call) else "MISSING"))
+    missing = [c for c in ("onKey", "onMotion", "onTouch", "onGameActivity") if not found.get(c)]
+    if missing:
+        return ["the shipped APK does not call %s" % ", ".join(missing)]
+    return []
+
+
 def verify(apk_out, orig_apk, build_tools, tree=None):
     log("== 8. verification")
     problems = []
@@ -450,6 +491,10 @@ def verify(apk_out, orig_apk, build_tools, tree=None):
             problems.append("package name changed in the rebuild")
         if "com.ps3mod.PS3BootActivity" not in badging:
             problems.append("the boot activity is not the launcher")
+        if "1.4-ps3v7" not in badging:
+            problems.append("versionName was not set")
+        if "Ninja Arashi PS3v7" not in badging:
+            problems.append("the launcher label does not carry the version")
         problems.extend(check_dex_classes(apk_out, build_tools))
     except SystemExit:
         problems.append("aapt badging failed")
@@ -540,6 +585,12 @@ def main():
         normalize_zip(unsig, normalized)
         sign(a.build_tools, a.java, a.keydir, normalized, a.out)
     ok = verify(a.out, a.apk_in, a.build_tools, tree)
+    if ok:
+        log("== 9. self-check of the shipped APK")
+        extra = selfcheck_shipped(a.out, a.apktool, a.java, a.work)
+        if extra:
+            log("    PROBLEMS: %s" % extra)
+            ok = False
     if os.path.exists(a.out):
         with open(a.out + ".sha256", "w") as fh:
             fh.write("%s  %s\n" % (sha256(a.out), os.path.basename(a.out)))
