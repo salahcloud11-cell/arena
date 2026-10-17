@@ -38,21 +38,26 @@ you already have.
 
 ## How it works (Java mapper - the shipped path)
 
-1. `com.ps3mod.PS3App` is registered as the app's `Application` class
-   (`android:name` in the manifest). It installs a **dynamic proxy** over the
-   activity's `Window.Callback`, so controller key/`genericMotion` events are
-   seen *before* Unity's player activity swallows them.
-   A `Proxy` is used instead of a hand-written `Window.Callback` implementation
-   so the code needs only `java.lang.reflect` and cannot break when Android adds
-   methods to that interface.
+1. `com.ps3mod.PS3Activity` extends `com.unity3d.player.UnityPlayerActivity` and
+   overrides `dispatchKeyEvent` / `dispatchGenericMotionEvent`, so pad input is
+   seen *before* Unity's engine. This is the layer that matters: Unity's
+   overrides never call `Window.superDispatchKeyEvent`, so a `Window.Callback`
+   wrapper (the first attempt) never received a single event — which is why
+   SELECT did nothing. The manifest's activity `android:name` points at this
+   subclass. (`java_stub/` holds a compile-time-only stand-in for Unity's class;
+   the game's real class is kept when the smali is merged.)
 2. `com.ps3mod.PS3Mapper` converts the pad state into a real multi-touch stream
    (up to 10 pointers) and dispatches it with `Activity.dispatchTouchEvent`,
    exactly like a finger on the glass.
 3. Both classes are compiled with `javac`/`d8` and merged into the game's own
    `classes.dex` (dex → smali via apktool, then rebuilt), so the APK stays
    single-dex and keeps working on Android < 5 too.
-4. The calibration screen stores per-control screen positions in
-   `SharedPreferences`; the defaults are only a starting guess.
+4. The calibration screen opens by itself on the first launch, and again on
+   SELECT or three quick taps in the top-left corner. It stores per-control
+   screen positions plus the movement style (drag joystick / fixed buttons) in
+   `SharedPreferences`.
+5. On resume the mapper lists the gamepads Android reports (`InputDevice`), so
+   "the pad is not connected" can be told apart from "the game ignores it".
 
 ## Build it yourself
 
