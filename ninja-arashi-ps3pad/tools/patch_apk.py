@@ -352,7 +352,7 @@ def sign(build_tools, java, keydir, apk_in, apk_out):
     return apk_out
 
 
-def verify(apk_out, orig_apk, build_tools):
+def verify(apk_out, orig_apk, build_tools, tree=None):
     log("== 8. verification")
     problems = []
     if not os.path.exists(apk_out):
@@ -449,12 +449,25 @@ def verify(apk_out, orig_apk, build_tools):
         if "com.blackpanther.ninjaarashi" not in badging:
             problems.append("package name changed in the rebuild")
         if "com.ps3mod.PS3BootActivity" not in badging:
-            problems.append("the boot activity is not in the manifest")
-        if "com.unity3d.player.UnityPlayerActivity" not in badging:
-            problems.append("the game's Unity activity disappeared from the manifest")
+            problems.append("the boot activity is not the launcher")
         problems.extend(check_dex_classes(apk_out, build_tools))
     except SystemExit:
         problems.append("aapt badging failed")
+
+    # the game's activity must still be declared (badging does not list it)
+    if tree:
+        try:
+            manifest = open(os.path.join(tree, "AndroidManifest.xml"), encoding="utf-8").read()
+            if "com.unity3d.player.UnityPlayerActivity" not in manifest:
+                problems.append("the game's Unity activity disappeared from the manifest")
+            else:
+                log("    manifest still declares com.unity3d.player.UnityPlayerActivity")
+            if manifest.count("android.intent.category.LAUNCHER") != 1:
+                problems.append("expected exactly one LAUNCHER category")
+            else:
+                log("    exactly one launcher activity")
+        except Exception as exc:                 # noqa: BLE001
+            problems.append("could not read the rebuilt manifest: %s" % exc)
 
     if problems:
         log("    PROBLEMS: %s" % problems)
@@ -524,7 +537,7 @@ def main():
         normalized = os.path.join(a.work, "unsigned-normalized.apk")
         normalize_zip(unsig, normalized)
         sign(a.build_tools, a.java, a.keydir, normalized, a.out)
-    ok = verify(a.out, a.apk_in, a.build_tools)
+    ok = verify(a.out, a.apk_in, a.build_tools, tree)
     if os.path.exists(a.out):
         with open(a.out + ".sha256", "w") as fh:
             fh.write("%s  %s\n" % (sha256(a.out), os.path.basename(a.out)))
