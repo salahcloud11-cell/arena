@@ -80,66 +80,18 @@ def zip_entry_sha(apk, name):
 
 # --------------------------------------------------------------------- steps
 
-def check_dex_classes(apk, build_tools):
-    """Prove that the shipped dex really contains the mapper, and that the
-    activity it launches extends the game's Unity player activity.
-
-    A manifest string alone does not prove this: the class has to be compiled
-    into the dex with the right superclass, or the app never starts the mod.
-    The check uses the SDK's dexdump (reliable) and falls back to a byte-level
-    containment check if dexdump is unavailable.
-    """
+def check_dex_classes(apk, build_tools=None):
+    """Prove the mapper really made it into the shipped classes.dex."""
     problems = []
-    tmp = "/tmp/_check_classes.dex"
     with zipfile.ZipFile(apk) as z:
         data = z.read("classes.dex")
-    with open(tmp, "wb") as fh:
-        fh.write(data)
-
-    dexdump = os.path.join(build_tools, "dexdump")
-    text = None
-    if os.path.exists(dexdump):
-        try:
-            text = run([dexdump, tmp], check=False)
-        except Exception:                        # noqa: BLE001
-            text = None
-
-    if text and "Class descriptor" in text:
-        info = {}
-        current = None
-        for line in text.splitlines():
-            line = line.strip()
-            if line.startswith("Class descriptor"):
-                cur = line.split(":", 1)[1].strip().strip("'")
-                info[cur] = {}
-                current = cur
-            elif current and line.startswith("Superclass"):
-                info[current]["super"] = line.split(":", 1)[1].strip().strip("'")
-        ours = sorted(k for k in info if k.startswith("Lcom/ps3mod/"))
-        log("    com/ps3mod classes in classes.dex: %s" % ", ".join(ours))
-        if "Lcom/ps3mod/PS3Activity;" not in info:
-            problems.append("com.ps3mod.PS3Activity is missing from classes.dex")
-        else:
-            sup = info["Lcom/ps3mod/PS3Activity;"].get("super")
-            log("    PS3Activity extends %s" % sup)
-            if sup != "Lcom/unity3d/player/UnityPlayerActivity;":
-                problems.append("PS3Activity does not extend UnityPlayerActivity (%s)" % sup)
-        if "Lcom/unity3d/player/UnityPlayerActivity;" not in info:
-            problems.append("the game's UnityPlayerActivity is missing from the dex")
-        if "Lcom/ps3mod/PS3Mapper;" not in info:
-            problems.append("com.ps3mod.PS3Mapper is missing from classes.dex")
-        if not problems:
-            log("    dex OK: the launched activity subclasses the game's activity")
-        return problems
-
-    # fallback: at least prove the classes are in the file
-    log("    dexdump unavailable - falling back to descriptor search")
     for desc in (b"Lcom/ps3mod/PS3Activity;", b"Lcom/ps3mod/PS3Mapper;",
                  b"Lcom/unity3d/player/UnityPlayerActivity;"):
         if desc not in data:
             problems.append("%s is missing from classes.dex" % desc.decode())
     if not problems:
-        log("    descriptors present (superclass not verified without dexdump)")
+        log("    classes.dex contains PS3Activity, PS3Mapper and the game's "
+            "UnityPlayerActivity")
     return problems
 
 
@@ -310,6 +262,18 @@ def merge_smali(tree, smali):
             shutil.copyfile(src, dst)
             copied += 1
     log("    %d smali files copied into %s" % (copied, dest_root))
+
+    # Hard assertion: the activity we are about to make the app's launcher must
+    # subclass the game's Unity activity. Checked on the smali apktool decoded
+    # from our compiled dex, so the check runs with a tool that is known to work.
+    act = os.path.join(dest_root, "com", "ps3mod", "PS3Activity.smali")
+    if not os.path.exists(act):
+        raise SystemExit("PS3Activity.smali was not produced - the mod would not run")
+    with open(act, encoding="utf-8", errors="replace") as fh:
+        smali_text = fh.read()
+    if ".super Lcom/unity3d/player/UnityPlayerActivity;" not in smali_text:
+        raise SystemExit("PS3Activity does not extend UnityPlayerActivity")
+    log("    PS3Activity.smali: .super Lcom/unity3d/player/UnityPlayerActivity; OK")
     if skipped:
         log("    kept the game's own version of: %s" % skipped)
     if not copied:
