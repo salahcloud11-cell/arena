@@ -384,7 +384,8 @@ def selfcheck_shipped(apk_out, apktool, java, work):
     if os.path.isdir(out):
         shutil.rmtree(out)
     try:
-        run([java, "-Xmx2g", "-jar", apktool, "d", "-f", "-s", "-o", out, apk_out],
+        # -r: decode sources (smali) but keep resources raw - we only need the code
+        run([java, "-Xmx2g", "-jar", apktool, "d", "-f", "-r", "-o", out, apk_out],
             check=False)
     except Exception:                            # noqa: BLE001
         return []
