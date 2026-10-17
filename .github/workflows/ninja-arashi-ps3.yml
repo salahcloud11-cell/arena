@@ -116,6 +116,20 @@ jobs:
             "$JAVA_HOME/bin/keytool" -help >/dev/null 2>&1 || true
           } 2>&1 | tee "$WORK/logs/sdk.log"
 
+      - name: Build the PS3 test app (small diagnostic APK)
+        run: |
+          set -euo pipefail
+          {
+            python3 ninja-arashi-ps3pad/tools/build_tester.py \
+              --android-jar "$ANDROID_HOME/platforms/android-34/android.jar" \
+              --build-tools "$ANDROID_HOME/build-tools/34.0.0" \
+              --java "$JAVA_HOME/bin/java" \
+              --keydir "$WORK/keys" \
+              --out "$WORK/ps3-tester.apk" \
+              --work "$WORK/tester"
+            ls -la "$WORK/ps3-tester.apk"
+          } 2>&1 | tee "$WORK/logs/tester.log"
+
       - name: Download apktool
         run: |
           set -euo pipefail
@@ -184,6 +198,9 @@ jobs:
               echo "  from Android and replayed as synthetic touches - no native code added)"
               echo "- uninstall the original game first: the APK is signed with a different key"
               echo "- connect the pad **before** starting the game"
+              echo "**First install \`ps3-tester.apk\` (100 KB) and open it.** It prints which"
+              echo "version of the game is installed and whether the pad reaches the app."
+              echo
               echo "- press **SELECT** (Back button on the pad) inside the game to open the"
               echo "  calibration screen and place each button where the game's own button is"
               echo "- controls: stick / D-pad = run, CROSS = jump, SQUARE = attack,"
@@ -193,12 +210,16 @@ jobs:
               echo
               echo "sha256: \`$(sha256sum "$APK" | cut -d' ' -f1)\`"
             } > "$NOTES"
+            EXTRA=()
+            if [ -f "$WORK/ps3-tester.apk" ]; then
+              EXTRA=("$WORK/ps3-tester.apk")
+            fi
             if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-              gh release upload "$RELEASE_TAG" "$APK" "$APK.sha256" --clobber
+              gh release upload "$RELEASE_TAG" "$APK" "$APK.sha256" "${EXTRA[@]}" --clobber
               gh release edit "$RELEASE_TAG" --title "$TITLE" --notes-file "$NOTES"
             else
               gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$TITLE" \
-                --notes-file "$NOTES" "$APK" "$APK.sha256"
+                --notes-file "$NOTES" "$APK" "$APK.sha256" "${EXTRA[@]}"
             fi
             gh release view "$RELEASE_TAG"
           } 2>&1 | tee "$WORK/logs/release.log"
@@ -240,7 +261,7 @@ jobs:
             echo
             echo "Commit \`${GITHUB_SHA:0:8}\` - [run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
             echo
-            for f in patch signing sdk tools download release; do
+            for f in tester patch signing sdk tools download release; do
               if [ -f "$WORK/logs/$f.log" ]; then
                 echo "<details><summary>$f.log</summary>"
                 echo

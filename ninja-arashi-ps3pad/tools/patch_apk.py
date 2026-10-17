@@ -143,7 +143,7 @@ def report_launcher(tree):
     # Make our diagnostic boot screen the launcher: it is drawn before Unity,
     # so "is the mod installed and is the pad seen?" is answered visibly instead
     # of guessing from inside the game.
-    version_label = "Ninja Arashi PS3v7"
+    version_label = "Ninja Arashi PS3v8"
     boot = ('<activity android:name="com.ps3mod.PS3BootActivity"'
             ' android:exported="true"'
             ' android:label="' + version_label + '"'
@@ -167,21 +167,21 @@ def report_launcher(tree):
     # carry the build version: that makes "did the new APK install?" answerable
     # without opening anything.
     xml2, n = re.subn(r'android:versionName="[^"]*"',
-                      'android:versionName="1.4-ps3v7"', xml, count=1)
+                      'android:versionName="1.4-ps3v8"', xml, count=1)
     if n:
         xml = xml2
-        log("    versionName set to 1.4-ps3v7 in the manifest")
+        log("    versionName set to 1.4-ps3v8 in the manifest")
 
     # apktool rebuilds versionName from apktool.yml, which overrides the manifest
     yml_path = os.path.join(tree, "apktool.yml")
     if os.path.exists(yml_path):
         yml = open(yml_path, encoding="utf-8").read()
         if re.search(r"^\s*versionName:", yml, re.M):
-            yml = re.sub(r"^(\s*versionName:\s*).*$", r"\g<1>1.4-ps3v7", yml, count=1, flags=re.M)
+            yml = re.sub(r"^(\s*versionName:\s*).*$", r"\g<1>1.4-ps3v8", yml, count=1, flags=re.M)
         else:
-            yml = yml.replace("versionInfo:", "versionInfo:\n  versionName: 1.4-ps3v7", 1)
+            yml = yml.replace("versionInfo:", "versionInfo:\n  versionName: 1.4-ps3v8", 1)
         open(yml_path, "w", encoding="utf-8").write(yml)
-        log("    versionName set to 1.4-ps3v7 in apktool.yml")
+        log("    versionName set to 1.4-ps3v8 in apktool.yml")
     open(path, "w", encoding="utf-8").write(xml)
     log("    added com.ps3mod.PS3BootActivity as the launcher (label: %s)"
         % version_label)
@@ -220,11 +220,11 @@ def java_compile(java_src_dir, work, java, android_jar, build_tools, stub_dir=No
         raise SystemExit("no java sources found in " + java_src_dir)
     javac = jdk_tool(java, "javac")
     try:
-        run([javac, "--release", "8", "-nowarn", "-classpath", android_jar,
+        run([javac, "--release", "8", "-encoding", "UTF-8", "-nowarn", "-classpath", android_jar,
              "-d", classes] + sorted(sources))
     except SystemExit:
         log("    (--release 8 unsupported, retrying with -source/-target 8)")
-        run([javac, "-source", "8", "-target", "8", "-nowarn", "-classpath",
+        run([javac, "-source", "8", "-target", "8", "-encoding", "UTF-8", "-nowarn", "-classpath",
              android_jar, "-d", classes] + sorted(sources))
     class_files = []
     for root, _, files in os.walk(classes):
@@ -503,9 +503,9 @@ def verify(apk_out, orig_apk, build_tools, tree=None):
             problems.append("package name changed in the rebuild")
         if "com.ps3mod.PS3BootActivity" not in badging:
             problems.append("the boot activity is not the launcher")
-        if "1.4-ps3v7" not in badging:
+        if "1.4-ps3v8" not in badging:
             problems.append("versionName was not set")
-        if "Ninja Arashi PS3v7" not in badging:
+        if "Ninja Arashi PS3v8" not in badging:
             problems.append("the launcher label does not carry the version")
         problems.extend(check_dex_classes(apk_out, build_tools))
     except SystemExit:
