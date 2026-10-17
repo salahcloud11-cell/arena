@@ -412,10 +412,11 @@ def verify(apk_out, orig_apk, build_tools):
         for n in dexes:
             if n == "classes.dex":
                 data = z.read(n)
-                if b"com/ps3mod/PS3App" not in data:
-                    problems.append("com.ps3mod.PS3App is not in classes.dex")
-                else:
-                    log("    com.ps3mod classes are in classes.dex")
+                for needed in (b"com/ps3mod/PS3Activity", b"com/ps3mod/PS3Mapper"):
+                    if needed not in data:
+                        problems.append("%s is not in classes.dex" % needed.decode())
+                if b"com/ps3mod/PS3Activity" in data and b"com/ps3mod/PS3Mapper" in data:
+                    log("    com.ps3mod.PS3Activity and PS3Mapper are in classes.dex")
     try:
         badging = run([os.path.join(build_tools, "aapt"), "dump", "badging", apk_out])
         for line in badging.splitlines():
