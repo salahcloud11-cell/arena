@@ -48,37 +48,58 @@ import android.widget.Toast;
 public class PS3Mapper {
 
     private static final String TAG = "PS3Mapper";
-    private static final String VER = "v8";
+    private static final String VER = "v9";
 
     /* ------------------------------------------------------------------ */
     /* functions                                                          */
     /* ------------------------------------------------------------------ */
-    private static final int F_MOVE = 0, F_JUMP = 1, F_ATTACK = 2, F_DASH = 3,
-            F_TRANS = 4, F_FI = 5, F_PAUSE = 6, F_ALT = 7;
-    private static final int FN = 8;
+    /* Every physical control has its own editable screen target.  The last
+     * five entries are user-created buttons, enabled with "+ ADD BUTTON". */
+    private static final int F_MOVE = 0, F_R_STICK = 1, F_X = 2, F_CIRCLE = 3,
+            F_SQUARE = 4, F_TRIANGLE = 5, F_L1 = 6, F_R1 = 7, F_L2 = 8,
+            F_R2 = 9, F_START = 10, F_SELECT = 11, F_L3 = 12, F_R3 = 13,
+            F_DLEFT = 14, F_DRIGHT = 15, F_DUP = 16, F_DDOWN = 17,
+            F_CUSTOM1 = 18;
+    private static final int FN = 23;
 
-    private static final String[] SKEY = {"move", "jump", "attack", "dash",
-            "transform", "throw", "pause", "alt"};
-    private static final String[] LABEL = {
-            "حركة (مركز العصا)", "قفز ✕", "هجوم □", "داش ○",
-            "تحوّل L1", "رمي △", "إيقاف START", "اليمين (وضع الأزرار)"};
+    private static final String[] SKEY = {"left_stick", "right_stick", "cross",
+            "circle", "square", "triangle", "l1", "r1", "l2", "r2",
+            "start", "select", "l3", "r3", "dleft", "dright", "dup", "ddown",
+            "custom1", "custom2", "custom3", "custom4", "custom5"};
+    private static final String[] LABEL = {"LEFT STICK / الحركة", "RIGHT STICK",
+            "✕ CROSS", "○ CIRCLE", "□ SQUARE", "△ TRIANGLE", "L1", "R1",
+            "L2", "R2", "START", "SELECT", "L3", "R3", "D-PAD LEFT",
+            "D-PAD RIGHT", "D-PAD UP", "D-PAD DOWN", "CUSTOM 1", "CUSTOM 2",
+            "CUSTOM 3", "CUSTOM 4", "CUSTOM 5"};
+    private static final String[] SHORT = {"L-STICK", "R-STICK", "✕", "○", "□", "△",
+            "L1", "R1", "L2", "R2", "START", "SELECT", "L3", "R3", "◀", "▶",
+            "▲", "▼", "+1", "+2", "+3", "+4", "+5"};
 
-    /** First-run guesses; the calibration screen replaces them. */
-    private static final float[] DX = {0.120f, 0.880f, 0.760f, 0.640f,
-            0.520f, 0.880f, 0.950f, 0.760f};
-    private static final float[] DY = {0.800f, 0.800f, 0.930f, 0.930f,
-            0.930f, 0.600f, 0.070f, 0.700f};
-
-    private static final boolean[] HOLD = {true, true, true, false,
-            false, false, false, false};
+    /** Safe first-run positions; every one can be moved in the editor. */
+    private static final float[] DX = {0.13f,0.82f,0.88f,0.94f,0.76f,0.88f,
+            0.08f,0.92f,0.16f,0.84f,0.56f,0.44f,0.25f,0.75f,0.06f,0.18f,
+            0.12f,0.12f,0.35f,0.45f,0.55f,0.65f,0.75f};
+    private static final float[] DY = {0.78f,0.72f,0.80f,0.68f,0.68f,0.56f,
+            0.08f,0.08f,0.08f,0.08f,0.08f,0.08f,0.88f,0.88f,0.78f,0.78f,
+            0.68f,0.88f,0.50f,0.50f,0.50f,0.50f,0.50f};
+    private static final int[] DEFAULT_KEYS = {-1, -2, KeyEvent.KEYCODE_BUTTON_A,
+            KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BUTTON_X, KeyEvent.KEYCODE_BUTTON_Y,
+            KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1,
+            KeyEvent.KEYCODE_BUTTON_L2, KeyEvent.KEYCODE_BUTTON_R2,
+            KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_SELECT,
+            KeyEvent.KEYCODE_BUTTON_THUMBL, KeyEvent.KEYCODE_BUTTON_THUMBR,
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, 0,0,0,0,0};
 
     private static final float[] px = new float[FN];
     private static final float[] py = new float[FN];
+    private static final int[] mappedKey = new int[FN];
+    private static final boolean[] slotEnabled = new boolean[FN];
 
     /* ------------------------------------------------------------------ */
     /* synthetic multi-touch engine                                       */
     /* ------------------------------------------------------------------ */
-    private static final int MAX_POINTERS = 10;
+    private static final int MAX_POINTERS = 24;
     private static final boolean[] pActive = new boolean[MAX_POINTERS];
     private static final float[] pX = new float[MAX_POINTERS];
     private static final float[] pY = new float[MAX_POINTERS];
@@ -107,11 +128,15 @@ public class PS3Mapper {
     private static boolean enabled = true;
     private static boolean calibrating = false;
     private static int captureIndex = -1;
+    private static int captureKeyIndex = -1;
     private static int lastCapture = -1;
+    private static TextView captureKeyView = null;
     private static boolean joyMode = true;
 
     private static boolean dLeft = false, dRight = false, dUp = false, dDown = false;
     private static float axisX = 0f;
+    private static float rightX = 0f, rightY = 0f;
+    private static boolean rightStickHeld = false, l2AxisHeld = false, r2AxisHeld = false;
     private static boolean leftHeld = false, rightHeld = false, joyHeld = false;
 
     private static long lastPadEvent = 0L;
@@ -119,16 +144,18 @@ public class PS3Mapper {
     private static Object inputManager = null;
     private static java.lang.reflect.Method mGetIds = null;
     private static java.lang.reflect.Method mGetKeyState = null;
-    private static final boolean[] pollKeys = new boolean[16];
+    private static final boolean[] pollKeys = new boolean[19];
     private static final int[] POLL_CODES = {
             KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_BUTTON_B,
             KeyEvent.KEYCODE_BUTTON_X, KeyEvent.KEYCODE_BUTTON_Y,
             KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1,
-            KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BACK,
+            KeyEvent.KEYCODE_BUTTON_L2, KeyEvent.KEYCODE_BUTTON_R2,
+            KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_SELECT,
+            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_BUTTON_THUMBL,
+            KeyEvent.KEYCODE_BUTTON_THUMBR, KeyEvent.KEYCODE_BUTTON_MODE,
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
-            KeyEvent.KEYCODE_BUTTON_L2, KeyEvent.KEYCODE_BUTTON_R2,
-            KeyEvent.KEYCODE_BUTTON_SELECT, KeyEvent.KEYCODE_BUTTON_THUMBL};
+            KeyEvent.KEYCODE_BUTTON_C};
     private static boolean connectedToast = false;
     private static boolean autoOpened = false;
     private static long l3Down = 0L, r3Down = 0L;
@@ -214,6 +241,8 @@ public class PS3Mapper {
         for (int i = 0; i < FN; i++) {
             px[i] = DX[i];
             py[i] = DY[i];
+            mappedKey[i] = DEFAULT_KEYS[i];
+            slotEnabled[i] = i < F_CUSTOM1;
         }
         try {
             SharedPreferences sp = a.getSharedPreferences("ps3pad", Context.MODE_PRIVATE);
@@ -221,6 +250,8 @@ public class PS3Mapper {
             for (int i = 0; i < FN; i++) {
                 px[i] = sp.getFloat("x_" + SKEY[i], DX[i]);
                 py[i] = sp.getFloat("y_" + SKEY[i], DY[i]);
+                mappedKey[i] = sp.getInt("key_" + SKEY[i], DEFAULT_KEYS[i]);
+                slotEnabled[i] = sp.getBoolean("enabled_" + SKEY[i], i < F_CUSTOM1);
             }
         } catch (Throwable ignored) {
         }
@@ -233,6 +264,8 @@ public class PS3Mapper {
             for (int i = 0; i < FN; i++) {
                 e.putFloat("x_" + SKEY[i], px[i]);
                 e.putFloat("y_" + SKEY[i], py[i]);
+                e.putInt("key_" + SKEY[i], mappedKey[i]);
+                e.putBoolean("enabled_" + SKEY[i], slotEnabled[i]);
             }
             e.putBoolean("calibrated", true);
             e.commit();
@@ -482,33 +515,10 @@ public class PS3Mapper {
             if (SystemClock.uptimeMillis() - lastPadEvent < 2000L) {
                 return;
             }
-            if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_BUTTON_SELECT) {
-                if (down && !calibrating) {
-                    showCalibration();
-                }
-                return;
-            }
             if (calibrating) {
-                return;
-            }
-            if (isDpad(code)) {
-                if (code == KeyEvent.KEYCODE_DPAD_LEFT) {
-                    dLeft = down;
-                } else if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                    dRight = down;
-                } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
-                    dUp = down;
-                } else {
-                    dDown = down;
+                if (down && captureKeyIndex >= 2) {
+                    assignCapturedKey(a, captureKeyIndex, code);
                 }
-                if (code == KeyEvent.KEYCODE_DPAD_UP) {
-                    if (down) {
-                        pressFunc(a, F_JUMP);
-                    } else {
-                        releaseFunc(a, F_JUMP);
-                    }
-                }
-                updateMove(a);
                 return;
             }
             int f = functionFor(code);
@@ -516,12 +526,8 @@ public class PS3Mapper {
                 return;
             }
             if (down) {
-                if (HOLD[f]) {
-                    pressFunc(a, f);
-                } else {
-                    tapFunc(a, f);
-                }
-            } else if (HOLD[f]) {
+                pressFunc(a, f);
+            } else {
                 releaseFunc(a, f);
             }
         } catch (Throwable t) {
@@ -677,6 +683,9 @@ public class PS3Mapper {
         leftHeld = false;
         rightHeld = false;
         joyHeld = false;
+        rightStickHeld = false;
+        l2AxisHeld = false;
+        r2AxisHeld = false;
         tapGen++;
     }
 
@@ -768,7 +777,7 @@ public class PS3Mapper {
         boolean wantLeft = x < -0.05f;
         boolean wantRight = x > 0.05f;
         if (wantLeft && rightHeld) {
-            ptrUp(a, F_ALT);
+            ptrUp(a, F_DRIGHT);
             rightHeld = false;
         }
         if (wantRight && leftHeld) {
@@ -780,7 +789,7 @@ public class PS3Mapper {
             leftHeld = true;
         }
         if (wantRight && !rightHeld) {
-            pressFunc(a, F_ALT);
+            pressFunc(a, F_DRIGHT);
             rightHeld = true;
         }
         if (!wantLeft && leftHeld) {
@@ -788,8 +797,46 @@ public class PS3Mapper {
             leftHeld = false;
         }
         if (!wantRight && rightHeld) {
-            ptrUp(a, F_ALT);
+            ptrUp(a, F_DRIGHT);
             rightHeld = false;
+        }
+    }
+
+    private static void updateRightStick(Activity a) {
+        float x = deadzone(rightX);
+        float y = deadzone(rightY);
+        float mag = Math.max(Math.abs(x), Math.abs(y));
+        if (mag < 0.06f) {
+            if (rightStickHeld) {
+                ptrUp(a, F_R_STICK);
+                rightStickHeld = false;
+            }
+            return;
+        }
+        float cx = fx(a, F_R_STICK);
+        float cy = fy(a, F_R_STICK);
+        if (!rightStickHeld) {
+            ptrDown(a, F_R_STICK, cx, cy);
+            rightStickHeld = true;
+        }
+        ptrMove(a, F_R_STICK, cx + x * JOY_RADIUS * viewW(a),
+                cy + y * JOY_RADIUS * viewH(a));
+    }
+
+    private static void axisButton(Activity a, int f, boolean down, boolean leftTrigger) {
+        boolean was = leftTrigger ? l2AxisHeld : r2AxisHeld;
+        if (down == was) {
+            return;
+        }
+        if (leftTrigger) {
+            l2AxisHeld = down;
+        } else {
+            r2AxisHeld = down;
+        }
+        if (down) {
+            pressFunc(a, f);
+        } else {
+            releaseFunc(a, f);
         }
     }
 
@@ -825,30 +872,12 @@ public class PS3Mapper {
     }
 
     private static int functionFor(int keyCode) {
-        switch (keyCode) {
-            case KeyEvent.KEYCODE_BUTTON_A:
-                return F_JUMP;
-            case KeyEvent.KEYCODE_BUTTON_B:
-                return F_DASH;
-            case KeyEvent.KEYCODE_BUTTON_X:
-                return F_ATTACK;
-            case KeyEvent.KEYCODE_BUTTON_Y:
-                return F_FI;
-            case KeyEvent.KEYCODE_BUTTON_R1:
-                return F_ATTACK;
-            case KeyEvent.KEYCODE_BUTTON_L1:
-                return F_TRANS;
-            case KeyEvent.KEYCODE_BUTTON_R2:
-                return F_DASH;
-            case KeyEvent.KEYCODE_BUTTON_L2:
-                return F_TRANS;
-            case KeyEvent.KEYCODE_BUTTON_START:
-                return F_PAUSE;
-            case KeyEvent.KEYCODE_DPAD_UP:
-                return F_JUMP;
-            default:
-                return -1;
+        for (int i = 2; i < FN; i++) {
+            if (slotEnabled[i] && mappedKey[i] == keyCode) {
+                return i;
+            }
         }
+        return -1;
     }
 
     /* ------------------------------------------------------------------ */
@@ -864,8 +893,6 @@ public class PS3Mapper {
             }
             int code = ev.getKeyCode();
             boolean pad = isPad(ev.getDeviceId(), ev.getSource());
-
-            /* The phone's own back key is not ours unless a pad is involved. */
             if (code == KeyEvent.KEYCODE_BACK && !pad) {
                 if (calibrating) {
                     hideCalibration();
@@ -879,71 +906,17 @@ public class PS3Mapper {
             if (ev.getRepeatCount() > 0) {
                 return true;
             }
+            boolean down = ev.getAction() == KeyEvent.ACTION_DOWN;
             padSeen(a);
             updateStatus(KeyEvent.keyCodeToString(code), code);
-            refreshChip(KeyEvent.keyCodeToString(code) + " " + code
-                    + (ev.getAction() == KeyEvent.ACTION_DOWN ? " ↓" : " ↑"));
+            refreshChip(KeyEvent.keyCodeToString(code) + " " + code + (down ? " ↓" : " ↑"));
 
-            boolean down = ev.getAction() == KeyEvent.ACTION_DOWN;
-
-            /* Any pad button opens calibration the first time, so the screen can
-             * be reached even if SELECT never arrives as KEYCODE_BACK. */
-            if (!calibrated(a) && !autoOpened) {
-                autoOpened = true;
-                showCalibration();
-                return true;
-            }
-
-            if (isSelect(code)) {
-                if (!down) {
-                    if (calibrating) {
-                        hideCalibration();
-                    } else {
-                        showCalibration();
-                    }
-                }
-                return true;
-            }
-
-            if (code == KeyEvent.KEYCODE_BUTTON_THUMBL) {
-                l3Down = down ? SystemClock.uptimeMillis() : 0L;
-                if (!down && r3Down > 0L && SystemClock.uptimeMillis() - r3Down < 800L) {
-                    r3Down = 0L;
-                    if (calibrating) {
-                        hideCalibration();
-                    } else {
-                        showCalibration();
-                    }
-                }
-                return true;
-            }
-            if (code == KeyEvent.KEYCODE_BUTTON_THUMBR) {
-                r3Down = down ? SystemClock.uptimeMillis() : 0L;
-                return true;
-            }
-
+            /* While "CHANGE" is armed, the next physical button becomes this
+             * screen target. Nothing is hardwired, including SELECT and D-pad. */
             if (calibrating) {
-                return true;
-            }
-
-            if (isDpad(code)) {
-                if (code == KeyEvent.KEYCODE_DPAD_LEFT) {
-                    dLeft = down;
-                } else if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                    dRight = down;
-                } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
-                    dUp = down;
-                } else {
-                    dDown = down;
+                if (down && captureKeyIndex >= 2) {
+                    assignCapturedKey(a, captureKeyIndex, code);
                 }
-                if (code == KeyEvent.KEYCODE_DPAD_UP) {
-                    if (down) {
-                        pressFunc(a, F_JUMP);
-                    } else {
-                        releaseFunc(a, F_JUMP);
-                    }
-                }
-                updateMove(a);
                 return true;
             }
 
@@ -952,12 +925,8 @@ public class PS3Mapper {
                 return false;
             }
             if (down) {
-                if (HOLD[f]) {
-                    pressFunc(a, f);
-                } else {
-                    tapFunc(a, f);
-                }
-            } else if (HOLD[f]) {
+                pressFunc(a, f);
+            } else {
                 releaseFunc(a, f);
             }
             return true;
@@ -995,6 +964,15 @@ public class PS3Mapper {
             }
             axisX = deadzone(x);
             updateMove(a);
+
+            rightX = ev.getAxisValue(MotionEvent.AXIS_RX);
+            rightY = ev.getAxisValue(MotionEvent.AXIS_RY);
+            updateRightStick(a);
+
+            /* Many Android DS3 drivers expose L2/R2 only as Z/RZ, with no key
+             * event. They still use the user's editable L2/R2 screen targets. */
+            axisButton(a, F_L2, ev.getAxisValue(MotionEvent.AXIS_Z) > 0.35f, true);
+            axisButton(a, F_R2, ev.getAxisValue(MotionEvent.AXIS_RZ) > 0.35f, false);
             return true;
         } catch (Throwable t) {
             Log.w(TAG, "onMotion failed", t);
@@ -1015,6 +993,8 @@ public class PS3Mapper {
     private static TextView chipPads = null;
     private static TextView chipKey = null;
     private static TextView chipReader = null;
+    private static FrameLayout buttonPreview = null;
+    private static boolean previewShown = true;
     private static String lastKeyText = "—";
     private static String readerText = "…";
     private static boolean badgeScheduled = false;
@@ -1071,12 +1051,27 @@ public class PS3Mapper {
             box.addView(chipKey);
             box.addView(chipReader);
 
-            box.setClickable(true);
-            box.setOnClickListener(new View.OnClickListener() {
+            LinearLayout bar = new LinearLayout(a);
+            bar.setOrientation(LinearLayout.HORIZONTAL);
+            Button customize = mkButton(a, "🎯 CUSTOMIZE", 8f);
+            customize.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     openCalibration(a);
                 }
             });
+            bar.addView(customize);
+            final Button visible = mkButton(a, previewShown ? "👁 HIDE" : "👁 SHOW", 8f);
+            visible.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    previewShown = !previewShown;
+                    visible.setText(previewShown ? "👁 HIDE" : "👁 SHOW");
+                    drawButtonPreview(a);
+                }
+            });
+            bar.addView(visible);
+            box.addView(bar);
+
+            box.setClickable(false);
 
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -1086,10 +1081,65 @@ public class PS3Mapper {
             lp.topMargin = di(a, 26);
             a.addContentView(box, lp);
             overlayRoot = box;
+            drawButtonPreview(a);
             refreshChip(null);
             Log.i(TAG, "badge installed over the game");
         } catch (Throwable t) {
             Log.w(TAG, "badge failed", t);
+        }
+    }
+
+    /** Draws a transparent, non-touchable map of every enabled PS3 target. */
+    private static void drawButtonPreview(Activity a) {
+        try {
+            if (buttonPreview != null && buttonPreview.getParent() instanceof ViewGroup) {
+                ((ViewGroup) buttonPreview.getParent()).removeView(buttonPreview);
+            }
+            buttonPreview = null;
+            if (!previewShown) {
+                return;
+            }
+            final FrameLayout layer = new FrameLayout(a);
+            layer.setClickable(false);
+            layer.setFocusable(false);
+            for (int i = 0; i < FN; i++) {
+                if (!slotEnabled[i]) {
+                    continue;
+                }
+                TextView m = new TextView(a);
+                m.setText(SHORT[i]);
+                m.setTextColor(0xEEFFFFFF);
+                m.setTextSize(TypedValue.COMPLEX_UNIT_SP, 8f);
+                m.setGravity(Gravity.CENTER);
+                m.setClickable(false);
+                GradientDrawable g = new GradientDrawable();
+                g.setShape(GradientDrawable.OVAL);
+                g.setColor(0x44000000);
+                g.setStroke(di(a, 1), 0xAA00FF88);
+                m.setBackground(g);
+                m.setPadding(di(a, 4), di(a, 4), di(a, 4), di(a, 4));
+                FrameLayout.LayoutParams mp = new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                layer.addView(m, mp);
+                final int f = i;
+                final TextView mark = m;
+                layer.post(new Runnable() {
+                    public void run() {
+                        int w = layer.getWidth();
+                        int h = layer.getHeight();
+                        mark.setX(px[f] * w - mark.getWidth() / 2f);
+                        mark.setY(py[f] * h - mark.getHeight() / 2f);
+                    }
+                });
+            }
+            a.addContentView(layer, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            buttonPreview = layer;
+            if (overlayRoot != null) {
+                overlayRoot.bringToFront();
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "button preview failed", t);
         }
     }
 
@@ -1145,12 +1195,38 @@ public class PS3Mapper {
         return b;
     }
 
+    private static String keyName(int code) {
+        if (code <= 0) {
+            return "اضغط CHANGE";
+        }
+        return KeyEvent.keyCodeToString(code).replace("KEYCODE_BUTTON_", "").replace("KEYCODE_", "");
+    }
+
+    /** Completes "CHANGE": one physical key owns one screen target. */
+    private static void assignCapturedKey(Activity a, int f, int code) {
+        if (f < 2 || f >= FN) {
+            return;
+        }
+        for (int i = 2; i < FN; i++) {
+            if (i != f && mappedKey[i] == code) {
+                mappedKey[i] = 0;
+            }
+        }
+        mappedKey[f] = code;
+        slotEnabled[f] = true;
+        captureKeyIndex = -1;
+        if (captureKeyView != null) {
+            captureKeyView.setText("✓ " + LABEL[f] + " = " + keyName(code));
+        }
+        savePositions(a);
+        toast(a, LABEL[f] + " ← " + keyName(code), Toast.LENGTH_SHORT);
+    }
+
     /* ------------------------------------------------------------------ */
     /* placement editor: drag each marker onto the game's own button        */
     /* ------------------------------------------------------------------ */
     private static View placer = null;
     private static final TextView[] marks = new TextView[FN];
-    private static final String[] SHORT = {"حركة", "✕", "□", "○", "L1", "△", "⏸", "→"};
 
     private static void showPlacer(final Activity a, final FrameLayout root,
                                    final ScrollView scroll, final View captureLayer) {
@@ -1239,6 +1315,7 @@ public class PS3Mapper {
                         ViewGroup.LayoutParams.WRAP_CONTENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT);
                 layer.addView(m, mlp);
+                m.setVisibility(slotEnabled[i] ? View.VISIBLE : View.GONE);
                 marks[i] = m;
             }
 
@@ -1353,9 +1430,14 @@ public class PS3Mapper {
             });
             column.addView(placerBtn);
 
+            final Button[] positionButtons = new Button[FN];
+            final Button[] changeButtons = new Button[FN];
             for (int i = 0; i < FN; i++) {
                 final int f = i;
-                Button b = mkButton(a, LABEL[i], 11f);
+                LinearLayout controlRow = new LinearLayout(a);
+                controlRow.setOrientation(LinearLayout.HORIZONTAL);
+                Button b = mkButton(a, "📍 " + LABEL[i], 9f);
+                b.setEnabled(slotEnabled[i]);
                 b.setOnClickListener(new View.OnClickListener() {
                     public void onClick(View v) {
                         captureIndex = f;
@@ -1366,8 +1448,43 @@ public class PS3Mapper {
                         toast(a, "المس مكان: " + LABEL[f], Toast.LENGTH_SHORT);
                     }
                 });
-                column.addView(b);
+                controlRow.addView(b, new LinearLayout.LayoutParams(0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                positionButtons[i] = b;
+
+                Button change = mkButton(a, f < 2 ? "ANALOG" : keyName(mappedKey[i]), 8f);
+                change.setEnabled(slotEnabled[i] && f >= 2);
+                change.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        captureKeyIndex = f;
+                        captureKeyView = statusView;
+                        statusView.setText("CHANGE " + LABEL[f]
+                                + ": اضغط الزر المطلوب فاليد دابا…");
+                    }
+                });
+                controlRow.addView(change, new LinearLayout.LayoutParams(0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0.65f));
+                changeButtons[i] = change;
+                column.addView(controlRow);
             }
+
+            Button addCustom = mkButton(a, "+ ADD ANY SCREEN BUTTON", 11f);
+            addCustom.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    for (int i = F_CUSTOM1; i < FN; i++) {
+                        if (!slotEnabled[i]) {
+                            slotEnabled[i] = true;
+                            positionButtons[i].setEnabled(true);
+                            changeButtons[i].setEnabled(true);
+                            savePositions(a);
+                            toast(a, LABEL[i] + " added — set PLACE then CHANGE", Toast.LENGTH_LONG);
+                            return;
+                        }
+                    }
+                    toast(a, "5 custom buttons already added", Toast.LENGTH_SHORT);
+                }
+            });
+            column.addView(addCustom);
 
             final Button modeBtn = mkButton(a, joyMode
                     ? "الحركة: سحب عصا ✔ (اضغط للتبديل)"
@@ -1388,7 +1505,7 @@ public class PS3Mapper {
             Button test = mkButton(a, "تجربة آخر زر", 11f);
             test.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
-                    final int f = lastCapture >= 0 ? lastCapture : F_JUMP;
+                    final int f = lastCapture >= 0 ? lastCapture : F_X;
                     toast(a, "تجربة: " + LABEL[f], Toast.LENGTH_SHORT);
                     boolean wasCal = calibrating;
                     calibrating = false;          /* allow the test injection */
@@ -1459,12 +1576,18 @@ public class PS3Mapper {
             }
             d.setOnKeyListener(new Dialog.OnKeyListener() {
                 public boolean onKey(android.content.DialogInterface di, int code, KeyEvent e) {
-                    if ((code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_BUTTON_SELECT)
+                    if (captureKeyIndex >= 2 && e.getAction() == KeyEvent.ACTION_DOWN) {
+                        assignCapturedKey(a, captureKeyIndex, code);
+                        return true;
+                    }
+                    /* Phone BACK closes; controller SELECT is an ordinary,
+                     * fully remappable button just like every other PS3 key. */
+                    if (code == KeyEvent.KEYCODE_BACK && e.getDeviceId() < 0
                             && e.getAction() == KeyEvent.ACTION_UP) {
                         hideCalibration();
                         return true;
                     }
-                    return false;
+                    return calibrating;
                 }
             });
             d.show();
@@ -1487,6 +1610,8 @@ public class PS3Mapper {
     private static void hideCalibration() {
         calibrating = false;
         captureIndex = -1;
+        captureKeyIndex = -1;
+        captureKeyView = null;
         statusView = null;
         placer = null;
         for (int i = 0; i < FN; i++) {
@@ -1504,6 +1629,7 @@ public class PS3Mapper {
         Activity a = activity;
         if (a != null) {
             releaseAll(a);
+            drawButtonPreview(a);
         }
         Log.i(TAG, "calibration closed");
     }

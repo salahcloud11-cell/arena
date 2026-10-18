@@ -33,7 +33,7 @@ import java.util.Locale;
  *   1. which version of Ninja Arashi is actually installed on the phone,
  *   2. does Android hand this app the pad's keys at all,
  *   3. does the hidden InputManager.getKeyCodeState() reader work on Android 11
- *      with targetSdk 29 - the one API the whole v7/v8 design rests on.
+ *      with targetSdk 29 - the one API the whole v8/v9 design rests on.
  *
  * It installs next to the game (its own package), so it can never conflict with
  * the game's signature, and it prints everything in large text on one screen.
@@ -41,7 +41,7 @@ import java.util.Locale;
 public class TesterActivity extends Activity {
 
     private static final String GAME = "com.blackpanther.ninjaarashi";
-    private static final String WANT_VERSION = "1.4-ps3v8";
+    private static final String WANT_VERSION = "1.4-ps3v9";
     private static final String WANT_LAUNCHER = "com.ps3mod.PS3BootActivity";
 
     private TextView gameVerdict, gameDetail, padList, keyLine, keyDetail, readerLine, logView;
@@ -74,7 +74,7 @@ public class TesterActivity extends Activity {
         int p = dp(12);
         col.setPadding(p, p, p, p);
 
-        col.addView(title("PS3 TEST v8"));
+        col.addView(title("PS3 TEST v9"));
         col.addView(small("هاد التطبيق كيقول ليك واش النسخة الجديدة ديال اللعبة مثبتة، وواش اليد كتوصل."));
 
         col.addView(title("1) اللعبة المثبتة"));
