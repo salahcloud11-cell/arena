@@ -424,7 +424,8 @@ def verify(apk_out, orig_apk, build_tools, tree=None):
                 n = zi.filename
                 if n.endswith("/"):
                     continue
-                if n == "classes.dex" or n == "AndroidManifest.xml" or n == "resources.arsc":
+                if (re.match(r"classes\d*\.dex$", n) or n == "AndroidManifest.xml"
+                        or n == "resources.arsc"):
                     continue
                 if n.startswith("res/") or n.startswith("META-INF/"):
                     continue
