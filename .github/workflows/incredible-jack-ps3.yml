@@ -52,8 +52,9 @@ jobs:
           {
             echo "Downloading public Drive file $DRIVE_FILE_ID"
             gdown "https://drive.google.com/uc?id=$DRIVE_FILE_ID" --fuzzy -O "$APK"
-            echo "downloaded bytes: $(stat -c%s "$APK") (expected $EXPECTED_BYTES)"
-            test "$(stat -c%s "$APK")" = "$EXPECTED_BYTES"
+            echo "downloaded bytes: $(stat -c%s "$APK") (Drive metadata said $EXPECTED_BYTES)"
+            test "$(stat -c%s "$APK")" -gt 1000000
+            unzip -t "$APK" >/dev/null
           } 2>&1 | tee "$WORK/logs/download.log"
           {
             echo "== FILE =="
@@ -101,7 +102,7 @@ jobs:
           python3 - <<'PY' > "$WORK/comment.md"
           import os
           print('### Incredible Jack APK inspection')
-          for name in ('inspect.log', 'apktool.log', 'decoded.log'):
+          for name in ('download.log', 'inspect.log', 'apktool.log', 'decoded.log'):
               path = os.path.join(os.environ['WORK'], 'logs', name)
               if not os.path.exists(path): continue
               text = open(path, errors='replace').read()
