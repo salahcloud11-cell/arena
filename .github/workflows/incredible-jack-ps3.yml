@@ -49,8 +49,12 @@ jobs:
         run: |
           set -euo pipefail
           APK="$WORK/incredible-jack.apk"
-          gdown "$DRIVE_FILE_ID" -O "$APK"
-          test "$(stat -c%s "$APK")" = "$EXPECTED_BYTES"
+          {
+            echo "Downloading public Drive file $DRIVE_FILE_ID"
+            gdown "https://drive.google.com/uc?id=$DRIVE_FILE_ID" --fuzzy -O "$APK"
+            echo "downloaded bytes: $(stat -c%s "$APK") (expected $EXPECTED_BYTES)"
+            test "$(stat -c%s "$APK")" = "$EXPECTED_BYTES"
+          } 2>&1 | tee "$WORK/logs/download.log"
           {
             echo "== FILE =="
             stat "$APK"
