@@ -143,7 +143,7 @@ def report_launcher(tree):
     # Make our diagnostic boot screen the launcher: it is drawn before Unity,
     # so "is the mod installed and is the pad seen?" is answered visibly instead
     # of guessing from inside the game.
-    version_label = "Ninja Arashi PS3v9"
+    version_label = "Ninja Arashi PS3v10"
     boot = ('<activity android:name="com.ps3mod.PS3BootActivity"'
             ' android:exported="true"'
             ' android:label="' + version_label + '"'
@@ -182,21 +182,21 @@ def report_launcher(tree):
         log("    application label set to: %s" % version_label)
 
     xml2, n = re.subn(r'android:versionName="[^"]*"',
-                      'android:versionName="1.4-ps3v9"', xml, count=1)
+                      'android:versionName="1.4-ps3v10"', xml, count=1)
     if n:
         xml = xml2
-        log("    versionName set to 1.4-ps3v9 in the manifest")
+        log("    versionName set to 1.4-ps3v10 in the manifest")
 
     # apktool rebuilds versionName from apktool.yml, which overrides the manifest
     yml_path = os.path.join(tree, "apktool.yml")
     if os.path.exists(yml_path):
         yml = open(yml_path, encoding="utf-8").read()
         if re.search(r"^\s*versionName:", yml, re.M):
-            yml = re.sub(r"^(\s*versionName:\s*).*$", r"\g<1>1.4-ps3v9", yml, count=1, flags=re.M)
+            yml = re.sub(r"^(\s*versionName:\s*).*$", r"\g<1>1.4-ps3v10", yml, count=1, flags=re.M)
         else:
-            yml = yml.replace("versionInfo:", "versionInfo:\n  versionName: 1.4-ps3v9", 1)
+            yml = yml.replace("versionInfo:", "versionInfo:\n  versionName: 1.4-ps3v10", 1)
         open(yml_path, "w", encoding="utf-8").write(yml)
-        log("    versionName set to 1.4-ps3v9 in apktool.yml")
+        log("    versionName set to 1.4-ps3v10 in apktool.yml")
     open(path, "w", encoding="utf-8").write(xml)
     log("    added com.ps3mod.PS3BootActivity as the launcher (label: %s)"
         % version_label)
@@ -518,11 +518,11 @@ def verify(apk_out, orig_apk, build_tools, tree=None):
             problems.append("package name changed in the rebuild")
         if "com.ps3mod.PS3BootActivity" not in badging:
             problems.append("the boot activity is not the launcher")
-        if "1.4-ps3v9" not in badging:
+        if "1.4-ps3v10" not in badging:
             problems.append("versionName was not set")
-        if "Ninja Arashi PS3v9" not in badging:
+        if "Ninja Arashi PS3v10" not in badging:
             problems.append("the launcher label does not carry the version")
-        if "application-label:'Ninja Arashi PS3v9'" not in badging:
+        if "application-label:'Ninja Arashi PS3v10'" not in badging:
             problems.append("the application label (home-screen name) does not carry the version")
         problems.extend(check_dex_classes(apk_out, build_tools))
     except SystemExit:

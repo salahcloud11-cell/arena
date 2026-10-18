@@ -55,7 +55,7 @@ public class PS3BootActivity extends Activity {
         col.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText("PS3 MOD v9 — المود محمّل ✓");
+        title.setText("PS3 MOD v10 — المود محمّل ✓");
         title.setTextColor(Color.rgb(120, 255, 120));
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f);
         col.addView(title);

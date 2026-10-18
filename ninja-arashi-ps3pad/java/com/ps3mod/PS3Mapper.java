@@ -48,7 +48,7 @@ import android.widget.Toast;
 public class PS3Mapper {
 
     private static final String TAG = "PS3Mapper";
-    private static final String VER = "v9";
+    private static final String VER = "v10";
 
     /* ------------------------------------------------------------------ */
     /* functions                                                          */
@@ -94,6 +94,7 @@ public class PS3Mapper {
     private static final float[] px = new float[FN];
     private static final float[] py = new float[FN];
     private static final int[] mappedKey = new int[FN];
+    private static final int[] clickCount = new int[FN];
     private static final boolean[] slotEnabled = new boolean[FN];
 
     /* ------------------------------------------------------------------ */
@@ -140,6 +141,12 @@ public class PS3Mapper {
     private static boolean leftHeld = false, rightHeld = false, joyHeld = false;
 
     private static long lastPadEvent = 0L;
+    private static int lastRealCode = -1;
+    private static boolean lastRealDown = false;
+    private static long lastRealAt = 0L;
+    private static int lastPollCode = -1;
+    private static boolean lastPollDown = false;
+    private static long lastPollAt = 0L;
     private static volatile boolean polling = false;
     private static Object inputManager = null;
     private static java.lang.reflect.Method mGetIds = null;
@@ -242,15 +249,19 @@ public class PS3Mapper {
             px[i] = DX[i];
             py[i] = DY[i];
             mappedKey[i] = DEFAULT_KEYS[i];
+            clickCount[i] = 1;
             slotEnabled[i] = i < F_CUSTOM1;
         }
         try {
             SharedPreferences sp = a.getSharedPreferences("ps3pad", Context.MODE_PRIVATE);
             joyMode = sp.getBoolean("joy_mode", true);
+            previewShown = sp.getBoolean("preview_shown", false);
             for (int i = 0; i < FN; i++) {
                 px[i] = sp.getFloat("x_" + SKEY[i], DX[i]);
                 py[i] = sp.getFloat("y_" + SKEY[i], DY[i]);
                 mappedKey[i] = sp.getInt("key_" + SKEY[i], DEFAULT_KEYS[i]);
+                clickCount[i] = Math.max(1, Math.min(5,
+                        sp.getInt("clicks_" + SKEY[i], 1)));
                 slotEnabled[i] = sp.getBoolean("enabled_" + SKEY[i], i < F_CUSTOM1);
             }
         } catch (Throwable ignored) {
@@ -261,10 +272,12 @@ public class PS3Mapper {
         try {
             SharedPreferences.Editor e = a.getSharedPreferences("ps3pad", Context.MODE_PRIVATE).edit();
             e.putBoolean("joy_mode", joyMode);
+            e.putBoolean("preview_shown", previewShown);
             for (int i = 0; i < FN; i++) {
                 e.putFloat("x_" + SKEY[i], px[i]);
                 e.putFloat("y_" + SKEY[i], py[i]);
                 e.putInt("key_" + SKEY[i], mappedKey[i]);
+                e.putInt("clicks_" + SKEY[i], clickCount[i]);
                 e.putBoolean("enabled_" + SKEY[i], slotEnabled[i]);
             }
             e.putBoolean("calibrated", true);
@@ -510,9 +523,11 @@ public class PS3Mapper {
                 activity = a;
                 loadPositions(a);
             }
-            /* If real events are arriving, they are authoritative - do not double
-             * up on the same press. */
-            if (SystemClock.uptimeMillis() - lastPadEvent < 2000L) {
+            /* De-duplicate only the exact transition that the Activity just
+             * delivered. The old two-second global suppression could discard a
+             * polled key-UP and leave LEFT held forever. */
+            if (code == lastRealCode && down == lastRealDown
+                    && SystemClock.uptimeMillis() - lastRealAt < 180L) {
                 return;
             }
             if (calibrating) {
@@ -525,11 +540,10 @@ public class PS3Mapper {
             if (f < 0) {
                 return;
             }
-            if (down) {
-                pressFunc(a, f);
-            } else {
-                releaseFunc(a, f);
-            }
+            lastPollCode = code;
+            lastPollDown = down;
+            lastPollAt = SystemClock.uptimeMillis();
+            activateFunc(a, f, down);
         } catch (Throwable t) {
             Log.w(TAG, "pollKey failed", t);
         }
@@ -725,6 +739,40 @@ public class PS3Mapper {
         }, TAP_RELEASE_MS);
     }
 
+    /** One target can generate 1..5 taps from one physical press. */
+    private static void activateFunc(final Activity a, final int f, boolean down) {
+        int clicks = (f >= 0 && f < FN) ? clickCount[f] : 1;
+        if (clicks <= 1) {
+            if (down) {
+                pressFunc(a, f);
+            } else {
+                releaseFunc(a, f);
+            }
+            return;
+        }
+        if (!down || calibrating) {
+            return;
+        }
+        final int gen = tapGen;
+        for (int i = 0; i < clicks; i++) {
+            final long start = i * 125L;
+            handler().postDelayed(new Runnable() {
+                public void run() {
+                    if (gen == tapGen) {
+                        pressFunc(a, f);
+                    }
+                }
+            }, start);
+            handler().postDelayed(new Runnable() {
+                public void run() {
+                    if (gen == tapGen) {
+                        releaseFunc(a, f);
+                    }
+                }
+            }, start + 60L);
+        }
+    }
+
     /* ------------------------------------------------------------------ */
     /* movement                                                           */
     /* ------------------------------------------------------------------ */
@@ -833,11 +881,7 @@ public class PS3Mapper {
         } else {
             r2AxisHeld = down;
         }
-        if (down) {
-            pressFunc(a, f);
-        } else {
-            releaseFunc(a, f);
-        }
+        activateFunc(a, f, down);
     }
 
     /* ------------------------------------------------------------------ */
@@ -907,6 +951,9 @@ public class PS3Mapper {
                 return true;
             }
             boolean down = ev.getAction() == KeyEvent.ACTION_DOWN;
+            lastRealCode = code;
+            lastRealDown = down;
+            lastRealAt = SystemClock.uptimeMillis();
             padSeen(a);
             updateStatus(KeyEvent.keyCodeToString(code), code);
             refreshChip(KeyEvent.keyCodeToString(code) + " " + code + (down ? " ↓" : " ↑"));
@@ -924,11 +971,11 @@ public class PS3Mapper {
             if (f < 0) {
                 return false;
             }
-            if (down) {
-                pressFunc(a, f);
-            } else {
-                releaseFunc(a, f);
+            if (code == lastPollCode && down == lastPollDown
+                    && SystemClock.uptimeMillis() - lastPollAt < 180L) {
+                return true;
             }
+            activateFunc(a, f, down);
             return true;
         } catch (Throwable t) {
             Log.w(TAG, "onKey failed", t);
@@ -994,7 +1041,8 @@ public class PS3Mapper {
     private static TextView chipKey = null;
     private static TextView chipReader = null;
     private static FrameLayout buttonPreview = null;
-    private static boolean previewShown = true;
+    /* Target circles are invisible during normal play by default. */
+    private static boolean previewShown = false;
     private static String lastKeyText = "—";
     private static String readerText = "…";
     private static boolean badgeScheduled = false;
@@ -1060,11 +1108,13 @@ public class PS3Mapper {
                 }
             });
             bar.addView(customize);
-            final Button visible = mkButton(a, previewShown ? "👁 HIDE" : "👁 SHOW", 8f);
+            final Button visible = mkButton(a,
+                    previewShown ? "👁 HIDE TARGETS" : "👁 SHOW TARGETS", 8f);
             visible.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     previewShown = !previewShown;
-                    visible.setText(previewShown ? "👁 HIDE" : "👁 SHOW");
+                    visible.setText(previewShown ? "👁 HIDE TARGETS" : "👁 SHOW TARGETS");
+                    savePositions(a);
                     drawButtonPreview(a);
                 }
             });
@@ -1216,7 +1266,10 @@ public class PS3Mapper {
         slotEnabled[f] = true;
         captureKeyIndex = -1;
         if (captureKeyView != null) {
-            captureKeyView.setText("✓ " + LABEL[f] + " = " + keyName(code));
+            captureKeyView.setText(keyName(code));
+        }
+        if (statusView != null) {
+            statusView.setText("✓ " + LABEL[f] + " = " + keyName(code));
         }
         savePositions(a);
         toast(a, LABEL[f] + " ← " + keyName(code), Toast.LENGTH_SHORT);
@@ -1404,8 +1457,9 @@ public class PS3Mapper {
             final ScrollView scroll = new ScrollView(a);
 
             TextView title = new TextView(a);
-            title.setText("معايرة PS3 " + VER
-                    + "\n١) اضغط زرً من القائمة  ٢) المس مكان زرّ اللعبة على الشاشة\nثم «حفظ وإغلاق».");
+            title.setText("PS3 CONTROL STUDIO " + VER
+                    + "\n📍 PLACE = مكان اللمس   |   CHANGE = زر اليد   |   1×..5× = عدد النقرات"
+                    + "\nكل الإعدادات كتتحفظ. دوائر اللمس يمكن إخفاؤها أثناء اللعب.");
             title.setTextColor(Color.WHITE);
             title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
             column.addView(title);
@@ -1430,9 +1484,38 @@ public class PS3Mapper {
             });
             column.addView(placerBtn);
 
+            final Button visibilityBtn = mkButton(a, previewShown
+                    ? "👁 TARGETS VISIBLE — MAKE INVISIBLE"
+                    : "◉ TARGETS INVISIBLE — SHOW", 10f);
+            visibilityBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    previewShown = !previewShown;
+                    visibilityBtn.setText(previewShown
+                            ? "👁 TARGETS VISIBLE — MAKE INVISIBLE"
+                            : "◉ TARGETS INVISIBLE — SHOW");
+                    savePositions(a);
+                    drawButtonPreview(a);
+                }
+            });
+            column.addView(visibilityBtn);
+
             final Button[] positionButtons = new Button[FN];
             final Button[] changeButtons = new Button[FN];
+            final Button[] clickButtons = new Button[FN];
             for (int i = 0; i < FN; i++) {
+                if (i == 0 || i == 2 || i == 6 || i == 10 || i == 14 || i == F_CUSTOM1) {
+                    TextView section = new TextView(a);
+                    String sectionName = i == 0 ? "── ANALOG STICKS ──"
+                            : i == 2 ? "── FACE BUTTONS ──"
+                            : i == 6 ? "── SHOULDERS / TRIGGERS ──"
+                            : i == 10 ? "── START / SELECT / STICK CLICKS ──"
+                            : i == 14 ? "── D-PAD ──" : "── EXTRA BUTTONS ──";
+                    section.setText(sectionName);
+                    section.setTextColor(0xFF64FF91);
+                    section.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f);
+                    section.setPadding(0, (int) dp(a, 5), 0, (int) dp(a, 2));
+                    column.addView(section);
+                }
                 final int f = i;
                 LinearLayout controlRow = new LinearLayout(a);
                 controlRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -1457,7 +1540,7 @@ public class PS3Mapper {
                 change.setOnClickListener(new View.OnClickListener() {
                     public void onClick(View v) {
                         captureKeyIndex = f;
-                        captureKeyView = statusView;
+                        captureKeyView = change;
                         statusView.setText("CHANGE " + LABEL[f]
                                 + ": اضغط الزر المطلوب فاليد دابا…");
                     }
@@ -1465,6 +1548,22 @@ public class PS3Mapper {
                 controlRow.addView(change, new LinearLayout.LayoutParams(0,
                         ViewGroup.LayoutParams.WRAP_CONTENT, 0.65f));
                 changeButtons[i] = change;
+
+                final Button clicks = mkButton(a,
+                        f < 2 ? "STICK" : clickCount[f] + "×", 8f);
+                clicks.setEnabled(slotEnabled[i] && f >= 2);
+                clicks.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        clickCount[f] = clickCount[f] >= 5 ? 1 : clickCount[f] + 1;
+                        clicks.setText(clickCount[f] + "×");
+                        savePositions(a);
+                        statusView.setText(LABEL[f] + " = " + clickCount[f]
+                                + " clicks for every press");
+                    }
+                });
+                controlRow.addView(clicks, new LinearLayout.LayoutParams(0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0.30f));
+                clickButtons[i] = clicks;
                 column.addView(controlRow);
             }
 
@@ -1476,6 +1575,7 @@ public class PS3Mapper {
                             slotEnabled[i] = true;
                             positionButtons[i].setEnabled(true);
                             changeButtons[i].setEnabled(true);
+                            clickButtons[i].setEnabled(true);
                             savePositions(a);
                             toast(a, LABEL[i] + " added — set PLACE then CHANGE", Toast.LENGTH_LONG);
                             return;
@@ -1509,12 +1609,12 @@ public class PS3Mapper {
                     toast(a, "تجربة: " + LABEL[f], Toast.LENGTH_SHORT);
                     boolean wasCal = calibrating;
                     calibrating = false;          /* allow the test injection */
-                    pressFunc(a, f);
+                    activateFunc(a, f, true);
                     handler().postDelayed(new Runnable() {
                         public void run() {
-                            releaseFunc(a, f);
+                            activateFunc(a, f, false);
                         }
-                    }, 220L);
+                    }, 750L);
                     calibrating = wasCal;
                 }
             });
@@ -1542,8 +1642,9 @@ public class PS3Mapper {
             scroll.addView(column, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT));
+            int panelWidth = Math.min((int) dp(a, 430), (int) (viewW(a) * 0.78f));
             FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(
-                    (int) dp(a, 300), ViewGroup.LayoutParams.MATCH_PARENT);
+                    panelWidth, ViewGroup.LayoutParams.MATCH_PARENT);
             slp.gravity = Gravity.LEFT | Gravity.TOP;
             root.addView(scroll, slp);
             root.addView(captureLayer, new FrameLayout.LayoutParams(
