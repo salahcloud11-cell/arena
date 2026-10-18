@@ -1,0 +1,108 @@
+name: Incredible Jack PS3 controller mod
+
+on:
+  push:
+    branches: ["arena/**", "main"]
+    paths:
+      - ".github/workflows/incredible-jack-ps3.yml"
+      - "incredible-jack-ps3pad/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: incredible-jack-ps3
+  cancel-in-progress: true
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      WORK: ${{ github.workspace }}/jackwork
+      DRIVE_FILE_ID: 1rjb0CeOME0zI5aI1P5IfTQWqo7DHZ1Fe
+      EXPECTED_BYTES: 87866720
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Prepare tools
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK/logs" "$WORK/tools"
+          python3 -m pip install --quiet gdown
+          SDKMAN="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -f "$ANDROID_HOME/build-tools/34.0.0/aapt" ]; then
+            yes | "$SDKMAN" --licenses >/dev/null 2>&1 || true
+            "$SDKMAN" "platforms;android-34" "build-tools;34.0.0"
+          fi
+          curl -fL --retry 3 -o "$WORK/tools/apktool.jar" \
+            https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar
+
+      - name: Download and inspect original APK
+        run: |
+          set -euo pipefail
+          APK="$WORK/incredible-jack.apk"
+          gdown "$DRIVE_FILE_ID" -O "$APK"
+          test "$(stat -c%s "$APK")" = "$EXPECTED_BYTES"
+          {
+            echo "== FILE =="
+            stat "$APK"
+            sha256sum "$APK"
+            file "$APK"
+            unzip -t "$APK" | tail -3
+            echo
+            echo "== BADGING =="
+            "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging "$APK"
+            echo
+            echo "== APK CONTENTS (engine clues) =="
+            unzip -l "$APK" | grep -Ei 'classes.*dex|lib/|assets/|unity|libgdx|cocos|godot|flutter' | head -400
+            echo
+            echo "== MANIFEST XMLTREE =="
+            "$ANDROID_HOME/build-tools/34.0.0/aapt" dump xmltree "$APK" AndroidManifest.xml
+          } 2>&1 | tee "$WORK/logs/inspect.log"
+
+          java -Xmx3g -jar "$WORK/tools/apktool.jar" d -f -o "$WORK/tree" "$APK" \
+            2>&1 | tee "$WORK/logs/apktool.log"
+          {
+            echo "== DECODED MANIFEST =="
+            cat "$WORK/tree/AndroidManifest.xml"
+            echo
+            echo "== SMALI ROOTS =="
+            find "$WORK/tree" -maxdepth 3 -type d | head -200
+            echo
+            echo "== ACTIVITY SMALI =="
+            grep -RIlE 'UnityPlayerActivity|onCreate\(Landroid/os/Bundle|dispatchKeyEvent|dispatchGenericMotionEvent' \
+              "$WORK/tree"/smali* 2>/dev/null | head -100
+          } 2>&1 | tee "$WORK/logs/decoded.log"
+
+      - name: Upload inspection logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: incredible-jack-inspection
+          path: ${{ env.WORK }}/logs
+
+      - name: Post inspection as commit comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY' > "$WORK/comment.md"
+          import os
+          print('### Incredible Jack APK inspection')
+          for name in ('inspect.log', 'apktool.log', 'decoded.log'):
+              path = os.path.join(os.environ['WORK'], 'logs', name)
+              if not os.path.exists(path): continue
+              text = open(path, errors='replace').read()
+              if len(text) > 18000: text = text[:9000] + '\n... truncated ...\n' + text[-9000:]
+              print(f'\n<details><summary>{name}</summary>\n\n```\n{text}\n```\n</details>')
+          PY
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" \
+            -f body="$(cat "$WORK/comment.md")" || true
