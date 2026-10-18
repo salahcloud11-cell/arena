@@ -87,11 +87,70 @@ jobs:
               "$WORK/tree"/smali* 2>/dev/null | head -100) || true
           } 2>&1 | tee "$WORK/logs/decoded.log"
 
-      - name: Upload inspection logs
+      - name: Build, sign and verify PS3 mod
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK/keys"
+          cp incredible-jack-ps3pad/signing/ps3mod.keystore "$WORK/keys/ps3mod.keystore"
+          python3 incredible-jack-ps3pad/tools/patch_apk.py \
+            --apk-in "$WORK/incredible-jack.apk" \
+            --java-src incredible-jack-ps3pad/java \
+            --apktool "$WORK/tools/apktool.jar" \
+            --android-jar "$ANDROID_HOME/platforms/android-34/android.jar" \
+            --build-tools "$ANDROID_HOME/build-tools/34.0.0" \
+            --java "$JAVA_HOME/bin/java" \
+            --work "$WORK/patch" \
+            --keydir "$WORK/keys" \
+            --out "$WORK/Incredible-Jack-PS3-v1.apk" \
+            2>&1 | tee "$WORK/logs/patch.log"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          APK="$WORK/Incredible-Jack-PS3-v1.apk"
+          HASH=$(sha256sum "$APK" | cut -d' ' -f1)
+          cat > "$WORK/release.md" <<EOF
+          Incredible Jack 1.36.6 with fully customizable DualShock 3 support.
+
+          - original Cocos2d-x activity remains the launcher
+          - all PS3 buttons, both sticks, analog triggers and five extra buttons
+          - invisible touch targets by default; SHOW/HIDE is saved
+          - PLACE, CHANGE and per-button 1x-5x multi-click Control Studio
+          - synthetic touches use the game's own on-screen controls
+          - arm64-v8a and armeabi-v7a preserved
+
+          SHA-256: \`$HASH\`
+          EOF
+          if gh release view incredible-jack-ps3-latest >/dev/null 2>&1; then
+            gh release upload incredible-jack-ps3-latest "$APK" "$APK.sha256" --clobber
+            gh release edit incredible-jack-ps3-latest \
+              --title "Incredible Jack 1.36.6 + PS3 Controller v1" --notes-file "$WORK/release.md"
+          else
+            gh release create incredible-jack-ps3-latest --target "$GITHUB_SHA" \
+              --title "Incredible Jack 1.36.6 + PS3 Controller v1" \
+              --notes-file "$WORK/release.md" "$APK" "$APK.sha256"
+          fi
+          gh release view incredible-jack-ps3-latest 2>&1 | tee "$WORK/logs/release.log"
+
+      - name: Transfer built APK into branch
+        run: |
+          set -euo pipefail
+          mkdir -p incredible-jack-ps3pad/transfer
+          cp "$WORK/Incredible-Jack-PS3-v1.apk" incredible-jack-ps3pad/transfer/
+          cp "$WORK/Incredible-Jack-PS3-v1.apk.sha256" incredible-jack-ps3pad/transfer/
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f incredible-jack-ps3pad/transfer
+          git commit -m "transfer: Incredible Jack PS3 build ${GITHUB_SHA:0:8} [skip ci]"
+          git push
+
+      - name: Upload build logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: incredible-jack-inspection
+          name: incredible-jack-ps3-build
           path: ${{ env.WORK }}/logs
 
       - name: Post inspection as commit comment
@@ -102,7 +161,7 @@ jobs:
           python3 - <<'PY' > "$WORK/comment.md"
           import os
           print('### Incredible Jack APK inspection')
-          for name in ('download.log', 'inspect.log', 'apktool.log', 'decoded.log'):
+          for name in ('download.log', 'inspect.log', 'apktool.log', 'decoded.log', 'patch.log', 'release.log'):
               path = os.path.join(os.environ['WORK'], 'logs', name)
               if not os.path.exists(path): continue
               text = open(path, errors='replace').read()
