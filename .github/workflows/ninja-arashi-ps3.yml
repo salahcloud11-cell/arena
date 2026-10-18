@@ -198,13 +198,14 @@ jobs:
               echo "  from Android and replayed as synthetic touches - no native code added)"
               echo "- uninstall the original game first: the APK is signed with a different key"
               echo "- connect the pad **before** starting the game"
-              echo "**First install \`ps3-tester.apk\` (100 KB) and open it.** It prints which"
+              echo "**First install \`ps3-tester.apk\` (17 KB) and open it.** It prints which"
               echo "version of the game is installed and whether the pad reaches the app."
               echo
-              echo "- press **SELECT** (Back button on the pad) inside the game to open the"
-              echo "  calibration screen and place each button where the game's own button is"
-              echo "- controls: stick / D-pad = run, CROSS = jump, SQUARE = attack,"
-              echo "  CIRCLE = dash, TRIANGLE = throw, L1 = transform, START = pause"
+              echo "- the visible **CUSTOMIZE** bar opens the editor without a controller key"
+              echo "- drag every PS3 target to any game button; press CHANGE then a pad button"
+              echo "  to remap it; SHOW/HIDE toggles the target overlay"
+              echo "- all DS3 controls, both sticks and analog L2/R2 are supported, plus five"
+              echo "  user-created screen buttons; mappings and positions are saved"
               echo
               echo "Full guide: [PS3-CONTROLLER-GUIDE.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/ninja-arashi-ps3pad/PS3-CONTROLLER-GUIDE.md)"
               echo
