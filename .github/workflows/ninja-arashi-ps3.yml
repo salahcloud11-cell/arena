@@ -206,6 +206,8 @@ jobs:
               echo "  to remap it; SHOW/HIDE toggles the target overlay"
               echo "- all DS3 controls, both sticks and analog L2/R2 are supported, plus five"
               echo "  user-created screen buttons; mappings and positions are saved"
+              echo "- targets can stay fully invisible; every button has a saved 1x-5x click count"
+              echo "- key transitions are de-duplicated individually so LEFT key-up is never lost"
               echo
               echo "Full guide: [PS3-CONTROLLER-GUIDE.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_SHA/ninja-arashi-ps3pad/PS3-CONTROLLER-GUIDE.md)"
               echo

@@ -1,37 +1,42 @@
-# 🎮 Ninja Arashi PS3 v9 — جميع الأزرار قابلة للتخصيص
+# 🎮 Ninja Arashi PS3 v10 — Control Studio
 
-## 1) تطبيق الفحص الصغير
+## 1) PS3 TEST v10
 
-**https://drive.google.com/file/d/1ndIIZYu_TVTCZi-rqoq2m6k2I2YeJuKK/view**
+**https://drive.google.com/file/d/1Vr_O0zFN6rL6BOe4CVoY5ZHjq3etvAfT/view**
 
-16,723 bytes · sha256 `38b18b54aa81d5d34db905a3e5039a285f0d707473d4e70d89b5022db0c352a7`
+16,723 bytes · sha256 `8d1b1928eefa6060ada3dd46b62d745fd13bd9c4ee7d241b2dec11f141ee8a99`
 
-## 2) اللعبة v9
+## 2) Ninja Arashi PS3 v10
 
-**https://drive.google.com/file/d/1f9cACWhrLJlx4xdYBIy8rfLXRAtTm2AM/view**
+**https://drive.google.com/file/d/1xp_riBLXCL6UldT7DNC57RoVRJV8T4wU/view**
 
-65,306,458 bytes · sha256 `505d51bfec424ffc8048ba98a4ca2640edadbbc7651ac37045d13b1307125bf7`
+65,306,458 bytes · sha256 `5b077beb1952fe099c716628d34b3ed1dd1c80f8cd2cee436c330d2002bb7621`
 
-اسم الأيقونة: **Ninja Arashi PS3v9** · versionName: `1.4-ps3v9`
+اسم الأيقونة: **Ninja Arashi PS3v10** · versionName: `1.4-ps3v10`
 
-## شريط الأزرار المرئي
+## Control Studio الجديد
 
-فوق اللعبة كيبان دائماً شريط PS3 v9:
+القائمة مقسمة بوضوح إلى Analog Sticks، Face Buttons، Shoulders/Triggers،
+Start/Select/L3/R3، D-pad، وExtra Buttons.
 
-- **🎯 CUSTOMIZE**: فتح محرر جميع الأزرار.
-- **👁 SHOW / HIDE**: إظهار أو إخفاء دوائر الأزرار فوق اللعبة.
-- الشريط كيبين عدد اليدات وآخر زر وصل وقارئ اليد.
+كل سطر فيه:
 
-## تخصيص أي زر
+- **📍 PLACE**: اختار مكان اللمس على الشاشة.
+- **CHANGE**: اضغطه، ثم اضغط أي زر في يد PS3 لتربطه.
+- **1× إلى 5×**: عدد النقرات التي ينفذها الزر بضغطة واحدة. اضغط الرقم لتغييره.
 
-1. اضغط **CUSTOMIZE**.
-2. اضغط **🎯 ضع الأزرار بالمسح**.
-3. اسحب كل دائرة فوق زر اللعبة المطلوب ثم **حفظ**.
-4. لتغيير وظيفة زر: اضغط **CHANGE** بجانب الهدف، ثم اضغط الزر المطلوب في يد PS3.
-5. لإضافة زر جديد غير موجود: اضغط **+ ADD ANY SCREEN BUTTON**. كاينين 5 أزرار إضافية.
+## إخفاء دوائر اللمس
 
-كل عنصر عنده مكان مستقل وربط مستقل: LEFT STICK، RIGHT STICK، ✕، ○، □، △، L1، R1،
-L2، R2، START، SELECT، L3، R3، والاتجاهات الأربعة. L2/R2 خدامين حتى مع الدرايفر
-اللي كيرسلهم كمحاور analog فقط.
+دوائر الأزرار أصبحت **مخفية افتراضياً** أثناء اللعب. الاختيار محفوظ دائماً:
 
-الإعدادات كتتحفظ وكتبقى من بعد إغلاق اللعبة.
+- `SHOW TARGETS` لإظهارها.
+- `HIDE TARGETS` أو `MAKE INVISIBLE` لإخفائها كلياً.
+- الدوائر المخفية لا تمنع عمل اليد.
+
+## إصلاح الحركة لليسار
+
+تم حذف الانتظار العام القديم الذي كان يمكن أن يتجاهل إشارة رفع زر LEFT ويترك اللاعب
+يمشي بلا توقف. v10 يفصل كل إشارة ضغط/رفع، ويقبل إشارة الرفع من القارئ المباشر حتى لو
+لم تصل من Unity. رفع LEFT يرفع اللمسة فوراً الآن.
+
+كل الأماكن، الربط، عدد النقرات، وحالة الإظهار/الإخفاء تُحفظ تلقائياً.
