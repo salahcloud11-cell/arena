@@ -51,7 +51,7 @@ jobs:
           APK="$WORK/incredible-jack.apk"
           {
             echo "Downloading public Drive file $DRIVE_FILE_ID"
-            gdown "https://drive.google.com/uc?id=$DRIVE_FILE_ID" --fuzzy -O "$APK"
+            gdown "$DRIVE_FILE_ID" -O "$APK"
             echo "downloaded bytes: $(stat -c%s "$APK") (Drive metadata said $EXPECTED_BYTES)"
             test "$(stat -c%s "$APK")" -gt 1000000
             unzip -t "$APK" >/dev/null
