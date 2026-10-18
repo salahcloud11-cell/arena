@@ -67,7 +67,7 @@ jobs:
             "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging "$APK"
             echo
             echo "== APK CONTENTS (engine clues) =="
-            unzip -l "$APK" | grep -Ei 'classes.*dex|lib/|assets/|unity|libgdx|cocos|godot|flutter' | head -400
+            (unzip -l "$APK" | grep -Ei 'classes.*dex|lib/|assets/|unity|libgdx|cocos|godot|flutter' | head -400) || true
             echo
             echo "== MANIFEST XMLTREE =="
             "$ANDROID_HOME/build-tools/34.0.0/aapt" dump xmltree "$APK" AndroidManifest.xml
@@ -80,11 +80,11 @@ jobs:
             cat "$WORK/tree/AndroidManifest.xml"
             echo
             echo "== SMALI ROOTS =="
-            find "$WORK/tree" -maxdepth 3 -type d | head -200
+            (find "$WORK/tree" -maxdepth 3 -type d | head -200) || true
             echo
             echo "== ACTIVITY SMALI =="
-            grep -RIlE 'UnityPlayerActivity|onCreate\(Landroid/os/Bundle|dispatchKeyEvent|dispatchGenericMotionEvent' \
-              "$WORK/tree"/smali* 2>/dev/null | head -100
+            (grep -RIlE 'UnityPlayerActivity|onCreate\(Landroid/os/Bundle|dispatchKeyEvent|dispatchGenericMotionEvent' \
+              "$WORK/tree"/smali* 2>/dev/null | head -100) || true
           } 2>&1 | tee "$WORK/logs/decoded.log"
 
       - name: Upload inspection logs
