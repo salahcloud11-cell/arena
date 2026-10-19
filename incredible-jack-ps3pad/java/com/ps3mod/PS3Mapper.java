@@ -48,7 +48,7 @@ import android.widget.Toast;
 public class PS3Mapper {
 
     private static final String TAG = "PS3Mapper";
-    private static final String VER = "Jack-v1";
+    private static final String VER = "Jack-v2";
 
     /* ------------------------------------------------------------------ */
     /* functions                                                          */
@@ -133,6 +133,12 @@ public class PS3Mapper {
     private static int lastCapture = -1;
     private static TextView captureKeyView = null;
     private static boolean joyMode = false;
+    private static boolean barShown = true;
+    private static boolean mouseMode = true;
+    private static boolean smartMode = true;
+    private static float mouseX = 0.50f, mouseY = 0.50f;
+    private static boolean chordL3 = false, chordR3 = false, chordFired = false;
+    private static boolean hatUpHeld = false, hatDownHeld = false;
 
     private static boolean dLeft = false, dRight = false, dUp = false, dDown = false;
     private static float axisX = 0f;
@@ -151,7 +157,6 @@ public class PS3Mapper {
     private static Object inputManager = null;
     private static java.lang.reflect.Method mGetIds = null;
     private static java.lang.reflect.Method mGetKeyState = null;
-    private static final boolean[] pollKeys = new boolean[19];
     private static final int[] POLL_CODES = {
             KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_BUTTON_B,
             KeyEvent.KEYCODE_BUTTON_X, KeyEvent.KEYCODE_BUTTON_Y,
@@ -162,7 +167,14 @@ public class PS3Mapper {
             KeyEvent.KEYCODE_BUTTON_THUMBR, KeyEvent.KEYCODE_BUTTON_MODE,
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
-            KeyEvent.KEYCODE_BUTTON_C};
+            KeyEvent.KEYCODE_BUTTON_C,
+            KeyEvent.KEYCODE_BUTTON_1, KeyEvent.KEYCODE_BUTTON_2,
+            KeyEvent.KEYCODE_BUTTON_3, KeyEvent.KEYCODE_BUTTON_4,
+            KeyEvent.KEYCODE_BUTTON_5, KeyEvent.KEYCODE_BUTTON_6,
+            KeyEvent.KEYCODE_BUTTON_7, KeyEvent.KEYCODE_BUTTON_8,
+            KeyEvent.KEYCODE_BUTTON_9, KeyEvent.KEYCODE_BUTTON_10,
+            KeyEvent.KEYCODE_BUTTON_11, KeyEvent.KEYCODE_BUTTON_12};
+    private static final boolean[] pollKeys = new boolean[POLL_CODES.length];
     private static boolean connectedToast = false;
     private static boolean autoOpened = false;
     private static long l3Down = 0L, r3Down = 0L;
@@ -256,6 +268,11 @@ public class PS3Mapper {
             SharedPreferences sp = a.getSharedPreferences("ps3pad", Context.MODE_PRIVATE);
             joyMode = sp.getBoolean("joy_mode", false);
             previewShown = sp.getBoolean("preview_shown", false);
+            barShown = sp.getBoolean("bar_shown", true);
+            mouseMode = sp.getBoolean("mouse_mode", true);
+            smartMode = sp.getBoolean("smart_mode", true);
+            mouseX = sp.getFloat("mouse_x", 0.50f);
+            mouseY = sp.getFloat("mouse_y", 0.50f);
             for (int i = 0; i < FN; i++) {
                 px[i] = sp.getFloat("x_" + SKEY[i], DX[i]);
                 py[i] = sp.getFloat("y_" + SKEY[i], DY[i]);
@@ -273,6 +290,11 @@ public class PS3Mapper {
             SharedPreferences.Editor e = a.getSharedPreferences("ps3pad", Context.MODE_PRIVATE).edit();
             e.putBoolean("joy_mode", joyMode);
             e.putBoolean("preview_shown", previewShown);
+            e.putBoolean("bar_shown", barShown);
+            e.putBoolean("mouse_mode", mouseMode);
+            e.putBoolean("smart_mode", smartMode);
+            e.putFloat("mouse_x", mouseX);
+            e.putFloat("mouse_y", mouseY);
             for (int i = 0; i < FN; i++) {
                 e.putFloat("x_" + SKEY[i], px[i]);
                 e.putFloat("y_" + SKEY[i], py[i]);
@@ -536,6 +558,9 @@ public class PS3Mapper {
                 }
                 return;
             }
+            if (handleSpecialButton(a, code, down)) {
+                return;
+            }
             int f = functionFor(code);
             if (f < 0) {
                 return;
@@ -700,6 +725,8 @@ public class PS3Mapper {
         rightStickHeld = false;
         l2AxisHeld = false;
         r2AxisHeld = false;
+        hatUpHeld = false;
+        hatDownHeld = false;
         tapGen++;
     }
 
@@ -850,6 +877,18 @@ public class PS3Mapper {
         }
     }
 
+    private static void moveMouse(Activity a, float rawX, float rawY) {
+        float x = deadzone(rawX);
+        float y = deadzone(rawY);
+        if (Math.abs(x) < 0.01f && Math.abs(y) < 0.01f) {
+            return;
+        }
+        /* Relative cursor motion: fine near the centre, fast at full deflection. */
+        mouseX = clamp01(mouseX + x * (0.010f + 0.018f * Math.abs(x)));
+        mouseY = clamp01(mouseY + y * (0.010f + 0.018f * Math.abs(y)));
+        positionMouseCursor(a);
+    }
+
     private static void updateRightStick(Activity a) {
         float x = deadzone(rightX);
         float y = deadzone(rightY);
@@ -887,6 +926,15 @@ public class PS3Mapper {
     /* ------------------------------------------------------------------ */
     /* device helpers                                                     */
     /* ------------------------------------------------------------------ */
+    private static boolean hasAxis(MotionEvent ev, int axis) {
+        try {
+            InputDevice d = ev.getDevice();
+            return d != null && d.getMotionRange(axis) != null;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private static boolean isPad(int deviceId, int sources) {
         if ((sources & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
                 || (sources & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK) {
@@ -921,7 +969,82 @@ public class PS3Mapper {
                 return i;
             }
         }
-        return -1;
+        if (!smartMode) {
+            return -1;
+        }
+        /* Some Android DS3 drivers report PlayStation buttons as BUTTON_1..12
+         * instead of A/B/X/Y/L1/etc. Native games accept both; Smart Input does
+         * the same without requiring manual remapping. */
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_BUTTON_1: return F_X;
+            case KeyEvent.KEYCODE_BUTTON_2: return F_CIRCLE;
+            case KeyEvent.KEYCODE_BUTTON_3: return F_SQUARE;
+            case KeyEvent.KEYCODE_BUTTON_4: return F_TRIANGLE;
+            case KeyEvent.KEYCODE_BUTTON_5: return F_L1;
+            case KeyEvent.KEYCODE_BUTTON_6: return F_R1;
+            case KeyEvent.KEYCODE_BUTTON_7: return F_L2;
+            case KeyEvent.KEYCODE_BUTTON_8: return F_R2;
+            case KeyEvent.KEYCODE_BUTTON_9: return F_SELECT;
+            case KeyEvent.KEYCODE_BUTTON_10: return F_START;
+            case KeyEvent.KEYCODE_BUTTON_11: return F_L3;
+            case KeyEvent.KEYCODE_BUTTON_12: return F_R3;
+            default: return -1;
+        }
+    }
+
+    private static boolean isL3Code(int code) {
+        return code == KeyEvent.KEYCODE_BUTTON_THUMBL || code == KeyEvent.KEYCODE_BUTTON_11;
+    }
+
+    private static boolean isR3Code(int code) {
+        return code == KeyEvent.KEYCODE_BUTTON_THUMBR || code == KeyEvent.KEYCODE_BUTTON_12;
+    }
+
+    /** L3+R3 always recovers the hidden bar; R3 clicks the right-stick mouse. */
+    private static boolean handleSpecialButton(Activity a, int code, boolean down) {
+        if (isL3Code(code)) {
+            chordL3 = down;
+        }
+        if (isR3Code(code)) {
+            chordR3 = down;
+        }
+        if (chordFired) {
+            if (!chordL3 && !chordR3) {
+                chordFired = false;
+            }
+            return isL3Code(code) || isR3Code(code);
+        }
+        if (chordL3 && chordR3) {
+            chordFired = true;
+            releaseFunc(a, F_L3);
+            releaseFunc(a, F_R3);
+            barShown = !barShown;
+            applyBarVisibility(a);
+            savePositions(a);
+            toast(a, barShown ? "PS3 menu visible" : "PS3 menu hidden — L3+R3 to show",
+                    Toast.LENGTH_LONG);
+            return true;
+        }
+        if (mouseMode && isR3Code(code)) {
+            if (down) {
+                mouseClick(a);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private static void mouseClick(final Activity a) {
+        if (a == null || calibrating) {
+            return;
+        }
+        final int pid = MAX_POINTERS - 1;
+        ptrDown(a, pid, mouseX * viewW(a), mouseY * viewH(a));
+        handler().postDelayed(new Runnable() {
+            public void run() {
+                ptrUp(a, pid);
+            }
+        }, 75L);
     }
 
     /* ------------------------------------------------------------------ */
@@ -964,6 +1087,9 @@ public class PS3Mapper {
                 if (down && captureKeyIndex >= 2) {
                     assignCapturedKey(a, captureKeyIndex, code);
                 }
+                return true;
+            }
+            if (handleSpecialButton(a, code, down)) {
                 return true;
             }
 
@@ -1012,14 +1138,49 @@ public class PS3Mapper {
             axisX = deadzone(x);
             updateMove(a);
 
-            rightX = ev.getAxisValue(MotionEvent.AXIS_RX);
-            rightY = ev.getAxisValue(MotionEvent.AXIS_RY);
-            updateRightStick(a);
+            /* Smart axis layout: newer drivers use RX/RY for the right stick;
+             * classic DS3 drivers use Z/RZ. Inspect the device ranges instead of
+             * hard-coding one vendor layout. */
+            boolean rightUsesRx = hasAxis(ev, MotionEvent.AXIS_RX)
+                    || hasAxis(ev, MotionEvent.AXIS_RY);
+            rightX = ev.getAxisValue(rightUsesRx ? MotionEvent.AXIS_RX : MotionEvent.AXIS_Z);
+            rightY = ev.getAxisValue(rightUsesRx ? MotionEvent.AXIS_RY : MotionEvent.AXIS_RZ);
+            if (mouseMode) {
+                moveMouse(a, rightX, rightY);
+            } else {
+                updateRightStick(a);
+            }
 
-            /* Many Android DS3 drivers expose L2/R2 only as Z/RZ, with no key
-             * event. They still use the user's editable L2/R2 screen targets. */
-            axisButton(a, F_L2, ev.getAxisValue(MotionEvent.AXIS_Z) > 0.35f, true);
-            axisButton(a, F_R2, ev.getAxisValue(MotionEvent.AXIS_RZ) > 0.35f, false);
+            /* HAT_Y is a real D-pad on many PlayStation drivers, not a key. */
+            float hatY = ev.getAxisValue(MotionEvent.AXIS_HAT_Y);
+            boolean wantUp = hatY < -0.55f;
+            boolean wantDown = hatY > 0.55f;
+            if (wantUp != hatUpHeld) {
+                hatUpHeld = wantUp;
+                activateFunc(a, F_DUP, wantUp);
+            }
+            if (wantDown != hatDownHeld) {
+                hatDownHeld = wantDown;
+                activateFunc(a, F_DDOWN, wantDown);
+            }
+
+            /* Trigger hysteresis prevents noisy analog L2/R2 values from
+             * chattering, like a native controller implementation. */
+            int leftAxis = hasAxis(ev, MotionEvent.AXIS_LTRIGGER)
+                    ? MotionEvent.AXIS_LTRIGGER : MotionEvent.AXIS_BRAKE;
+            int rightAxis = hasAxis(ev, MotionEvent.AXIS_RTRIGGER)
+                    ? MotionEvent.AXIS_RTRIGGER : MotionEvent.AXIS_GAS;
+            float leftValue = ev.getAxisValue(leftAxis);
+            float rightValue = ev.getAxisValue(rightAxis);
+            /* Only borrow Z/RZ for triggers when RX/RY already own the stick. */
+            if (rightUsesRx && !hasAxis(ev, leftAxis)) {
+                leftValue = ev.getAxisValue(MotionEvent.AXIS_Z);
+            }
+            if (rightUsesRx && !hasAxis(ev, rightAxis)) {
+                rightValue = ev.getAxisValue(MotionEvent.AXIS_RZ);
+            }
+            axisButton(a, F_L2, l2AxisHeld ? leftValue > 0.28f : leftValue > 0.55f, true);
+            axisButton(a, F_R2, r2AxisHeld ? rightValue > 0.28f : rightValue > 0.55f, false);
             return true;
         } catch (Throwable t) {
             Log.w(TAG, "onMotion failed", t);
@@ -1041,6 +1202,7 @@ public class PS3Mapper {
     private static TextView chipKey = null;
     private static TextView chipReader = null;
     private static FrameLayout buttonPreview = null;
+    private static TextView mouseCursor = null;
     /* Target circles are invisible during normal play by default. */
     private static boolean previewShown = false;
     private static String lastKeyText = "—";
@@ -1078,7 +1240,8 @@ public class PS3Mapper {
         try {
             if (overlayRoot != null && overlayRoot.getParent() != null
                     && overlayRoot.getWindowToken() != null) {
-                overlayRoot.setVisibility(View.VISIBLE);
+                overlayRoot.setVisibility(barShown ? View.VISIBLE : View.GONE);
+                drawMouseCursor(a);
                 refreshChip(null);
                 return;
             }
@@ -1119,6 +1282,30 @@ public class PS3Mapper {
                 }
             });
             bar.addView(visible);
+            final Button mouse = mkButton(a, mouseMode ? "🖱 R-STICK ON" : "🖱 OFF", 8f);
+            mouse.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    mouseMode = !mouseMode;
+                    mouse.setText(mouseMode ? "🖱 R-STICK ON" : "🖱 OFF");
+                    if (rightStickHeld) {
+                        ptrUp(a, F_R_STICK);
+                        rightStickHeld = false;
+                    }
+                    savePositions(a);
+                    drawMouseCursor(a);
+                }
+            });
+            bar.addView(mouse);
+            Button hideBar = mkButton(a, "✕ HIDE BAR", 8f);
+            hideBar.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    barShown = false;
+                    savePositions(a);
+                    applyBarVisibility(a);
+                    toast(a, "Menu hidden — press L3 + R3 together to show it", Toast.LENGTH_LONG);
+                }
+            });
+            bar.addView(hideBar);
             box.addView(bar);
 
             box.setClickable(false);
@@ -1131,12 +1318,69 @@ public class PS3Mapper {
             lp.topMargin = di(a, 26);
             a.addContentView(box, lp);
             overlayRoot = box;
+            applyBarVisibility(a);
             drawButtonPreview(a);
+            drawMouseCursor(a);
             refreshChip(null);
             Log.i(TAG, "badge installed over the game");
         } catch (Throwable t) {
             Log.w(TAG, "badge failed", t);
         }
+    }
+
+    private static void applyBarVisibility(Activity a) {
+        try {
+            if (overlayRoot != null) {
+                overlayRoot.setVisibility(barShown ? View.VISIBLE : View.GONE);
+                if (barShown) {
+                    overlayRoot.bringToFront();
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void drawMouseCursor(Activity a) {
+        try {
+            if (mouseCursor != null && mouseCursor.getParent() instanceof ViewGroup) {
+                ((ViewGroup) mouseCursor.getParent()).removeView(mouseCursor);
+            }
+            mouseCursor = null;
+            if (!mouseMode) {
+                return;
+            }
+            TextView cursor = new TextView(a);
+            cursor.setText("⊕");
+            cursor.setTextColor(0xFFFFFFFF);
+            cursor.setShadowLayer(4f, 1f, 1f, Color.BLACK);
+            cursor.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f);
+            cursor.setGravity(Gravity.CENTER);
+            cursor.setClickable(false);
+            cursor.setFocusable(false);
+            a.addContentView(cursor, new FrameLayout.LayoutParams(
+                    di(a, 42), di(a, 42)));
+            mouseCursor = cursor;
+            positionMouseCursor(a);
+            if (barShown && overlayRoot != null) {
+                overlayRoot.bringToFront();
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "mouse cursor failed", t);
+        }
+    }
+
+    private static void positionMouseCursor(final Activity a) {
+        handler().post(new Runnable() {
+            public void run() {
+                try {
+                    if (mouseCursor != null) {
+                        mouseCursor.setX(mouseX * viewW(a) - mouseCursor.getWidth() / 2f);
+                        mouseCursor.setY(mouseY * viewH(a) - mouseCursor.getHeight() / 2f);
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+        });
     }
 
     /** Draws a transparent, non-touchable map of every enabled PS3 target. */
@@ -1458,8 +1702,9 @@ public class PS3Mapper {
 
             TextView title = new TextView(a);
             title.setText("PS3 CONTROL STUDIO " + VER
-                    + "\n📍 PLACE = مكان اللمس   |   CHANGE = زر اليد   |   1×..5× = عدد النقرات"
-                    + "\nكل الإعدادات كتتحفظ. دوائر اللمس يمكن إخفاؤها أثناء اللعب.");
+                    + "\n📍 PLACE = touch position | CHANGE = pad key | 1×..5× = clicks"
+                    + "\nR-stick moves mouse · R3 clicks · L3+R3 shows/hides the small bar."
+                    + "\nTargets, bar, mouse and every mapping are saved.");
             title.setTextColor(Color.WHITE);
             title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
             column.addView(title);
@@ -1498,6 +1743,50 @@ public class PS3Mapper {
                 }
             });
             column.addView(visibilityBtn);
+
+            final Button smartBtn = mkButton(a, smartMode
+                    ? "🎮 SMART PLAYSTATION INPUT: ON"
+                    : "🎮 SMART PLAYSTATION INPUT: OFF", 10f);
+            smartBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    smartMode = !smartMode;
+                    smartBtn.setText(smartMode
+                            ? "🎮 SMART PLAYSTATION INPUT: ON"
+                            : "🎮 SMART PLAYSTATION INPUT: OFF");
+                    savePositions(a);
+                }
+            });
+            column.addView(smartBtn);
+
+            final Button mouseBtn = mkButton(a, mouseMode
+                    ? "🖱 RIGHT STICK MOUSE: ON (R3 = CLICK)"
+                    : "🖱 RIGHT STICK MOUSE: OFF", 10f);
+            mouseBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    mouseMode = !mouseMode;
+                    mouseBtn.setText(mouseMode
+                            ? "🖱 RIGHT STICK MOUSE: ON (R3 = CLICK)"
+                            : "🖱 RIGHT STICK MOUSE: OFF");
+                    if (rightStickHeld) {
+                        ptrUp(a, F_R_STICK);
+                        rightStickHeld = false;
+                    }
+                    savePositions(a);
+                    drawMouseCursor(a);
+                }
+            });
+            column.addView(mouseBtn);
+
+            Button barBtn = mkButton(a, "✕ HIDE SMALL MENU BAR (L3+R3 TO SHOW)", 10f);
+            barBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    barShown = false;
+                    savePositions(a);
+                    applyBarVisibility(a);
+                    statusView.setText("Small bar will stay hidden. L3 + R3 shows it again.");
+                }
+            });
+            column.addView(barBtn);
 
             final Button[] positionButtons = new Button[FN];
             final Button[] changeButtons = new Button[FN];
@@ -1731,6 +2020,8 @@ public class PS3Mapper {
         if (a != null) {
             releaseAll(a);
             drawButtonPreview(a);
+            drawMouseCursor(a);
+            applyBarVisibility(a);
         }
         Log.i(TAG, "calibration closed");
     }
