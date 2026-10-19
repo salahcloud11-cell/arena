@@ -55,15 +55,20 @@ jobs:
         with:
           name: remouse-reference-report
           path: ${{ env.WORK }}/report.txt
-      - name: Post report as commit comment
+      - name: Post report as commit comments
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python3 - <<'PY' > "$WORK/comment.md"
+          python3 - <<'PY'
           import os
           p=os.path.join(os.environ['WORK'],'report.txt')
           s=open(p,errors='replace').read()
-          if len(s)>50000: s=s[:25000]+'\n... truncated ...\n'+s[-25000:]
-          print('### ReMouse reference inspection\n\n```\n'+s+'\n```')
+          if len(s)>28000: s=s[:14000]+'\n... truncated ...\n'+s[-14000:]
+          folder=os.path.join(os.environ['WORK'],'chunks'); os.makedirs(folder,exist_ok=True)
+          for i in range(0,len(s),3000):
+              text='### ReMouse reference inspection — part %d\n\n```\n%s\n```' % (i//3000+1,s[i:i+3000])
+              open(os.path.join(folder,'%03d.md'%(i//3000)), 'w').write(text)
           PY
-          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" -f body="$(cat "$WORK/comment.md")"
+          for f in "$WORK"/chunks/*.md; do
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" -f body="$(cat "$f")"
+          done
