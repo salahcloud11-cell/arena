@@ -130,7 +130,7 @@ def report_launcher(tree):
             # A literal activity label makes the home-screen build unmistakable.
             tag = m.group(0).split(">", 1)[0] + ">"
             new_tag = re.sub(r'android:label="[^"]*"',
-                             'android:label="Incredible Jack PS3v3"', tag, count=1)
+                             'android:label="Incredible Jack PS3v4"', tag, count=1)
             xml = xml.replace(tag, new_tag, 1)
             break
     if not launcher:
@@ -144,26 +144,26 @@ def report_launcher(tree):
     tag = am.group(0)
     if 'android:label=' in tag:
         new_tag = re.sub(r'android:label="[^"]*"',
-                         'android:label="Incredible Jack PS3v3"', tag, count=1)
+                         'android:label="Incredible Jack PS3v4"', tag, count=1)
     else:
-        new_tag = tag[:-1] + ' android:label="Incredible Jack PS3v3">'
+        new_tag = tag[:-1] + ' android:label="Incredible Jack PS3v4">'
     xml = xml[:am.start()] + new_tag + xml[am.end():]
     xml = re.sub(r'android:versionName="[^"]*"',
-                 'android:versionName="1.36.6-ps3v3"', xml, count=1)
+                 'android:versionName="1.36.6-ps3v4"', xml, count=1)
     # Android 11 + hidden InputManager reader compatibility, while minSdk remains 23.
     xml = re.sub(r'android:targetSdkVersion="[^"]*"',
                  'android:targetSdkVersion="28"', xml, count=1)
 
     yml_path = os.path.join(tree, "apktool.yml")
     yml = open(yml_path, encoding="utf-8").read()
-    yml = re.sub(r"^(\s*versionName:\s*).*$", r"\g<1>1.36.6-ps3v3", yml,
+    yml = re.sub(r"^(\s*versionName:\s*).*$", r"\g<1>1.36.6-ps3v4", yml,
                  count=1, flags=re.M)
     yml = re.sub(r"^(\s*targetSdkVersion:\s*).*$", r"\g<1>'28'", yml,
                  count=1, flags=re.M)
     open(yml_path, "w", encoding="utf-8").write(yml)
     open(path, "w", encoding="utf-8").write(xml)
     log("    launcher: %s" % launcher)
-    log("    label: Incredible Jack PS3v3; versionName: 1.36.6-ps3v3; targetSdk: 28")
+    log("    label: Incredible Jack PS3v4; versionName: 1.36.6-ps3v4; targetSdk: 28")
     return launcher
 
 
@@ -482,11 +482,11 @@ def verify(apk_out, orig_apk, build_tools, tree=None):
             problems.append("package name changed in the rebuild")
         if "org.cocos2dx.incrediblejack.incrediblejack" not in badging:
             problems.append("the Cocos2d-x activity is not the launcher")
-        if "1.36.6-ps3v3" not in badging:
+        if "1.36.6-ps3v4" not in badging:
             problems.append("versionName was not set")
-        if "Incredible Jack PS3v3" not in badging:
+        if "Incredible Jack PS3v4" not in badging:
             problems.append("the launcher label does not carry the version")
-        if "application-label:'Incredible Jack PS3v3'" not in badging:
+        if "application-label:'Incredible Jack PS3v4'" not in badging:
             problems.append("the application label (home-screen name) does not carry the version")
         problems.extend(check_dex_classes(apk_out, build_tools))
     except SystemExit:

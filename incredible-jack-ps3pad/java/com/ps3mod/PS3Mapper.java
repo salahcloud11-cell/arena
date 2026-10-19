@@ -4,8 +4,10 @@ import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -15,6 +17,7 @@ import android.view.Gravity;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.PixelCopy;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -48,7 +51,7 @@ import android.widget.Toast;
 public class PS3Mapper {
 
     private static final String TAG = "PS3Mapper";
-    private static final String VER = "Jack-v3";
+    private static final String VER = "Jack-v4";
 
     /* ------------------------------------------------------------------ */
     /* functions                                                          */
@@ -96,6 +99,12 @@ public class PS3Mapper {
     private static final int[] mappedKey = new int[FN];
     private static final int[] clickCount = new int[FN];
     private static final boolean[] slotEnabled = new boolean[FN];
+    private static final int[] MASK_FUNCS = {F_MOVE, F_X, F_CIRCLE, F_SQUARE, F_TRIANGLE};
+    private static final String[] MASK_LABELS = {"MOVEMENT", "CROSS AREA", "CIRCLE AREA",
+            "SQUARE AREA", "TRIANGLE AREA"};
+    private static final boolean[] hideGameButton = new boolean[MASK_FUNCS.length];
+    private static final View[] gameButtonMasks = new View[MASK_FUNCS.length];
+    private static boolean maskRefreshRunning = false;
 
     /* ------------------------------------------------------------------ */
     /* synthetic multi-touch engine                                       */
@@ -136,10 +145,20 @@ public class PS3Mapper {
     private static boolean barShown = true;
     private static boolean mouseMode = true;
     private static boolean smartMode = true;
+    private static boolean cursorShown = true;
+    private static int cursorToggleCode = KeyEvent.KEYCODE_UNKNOWN;
+    private static int barToggleCode = KeyEvent.KEYCODE_UNKNOWN;
+    private static boolean cursorToggleHeld = false, barToggleHeld = false;
+    private static int captureSpecial = 0; // 1 = cursor toggle, 2 = menu toggle
+    private static TextView specialCaptureView = null;
     private static float mouseX = 0.50f, mouseY = 0.50f;
     private static volatile float mouseAxisX = 0f, mouseAxisY = 0f;
     private static boolean mouseLoopRunning = false;
     private static long mouseFrameTime = 0L;
+    private static boolean crossHeld = false, crossLong = false;
+    private static float scrollKeyX = 0f, scrollKeyY = 0f;
+    private static long lastScrollAt = 0L;
+    private static boolean scrollBusy = false;
     private static boolean chordL3 = false, chordR3 = false, chordFired = false;
     private static boolean hatUpHeld = false, hatDownHeld = false;
 
@@ -274,6 +293,9 @@ public class PS3Mapper {
             barShown = sp.getBoolean("bar_shown", true);
             mouseMode = sp.getBoolean("mouse_mode", true);
             smartMode = sp.getBoolean("smart_mode", true);
+            cursorShown = sp.getBoolean("cursor_shown", true);
+            cursorToggleCode = sp.getInt("cursor_toggle_code", KeyEvent.KEYCODE_UNKNOWN);
+            barToggleCode = sp.getInt("bar_toggle_code", KeyEvent.KEYCODE_UNKNOWN);
             mouseX = sp.getFloat("mouse_x", 0.50f);
             mouseY = sp.getFloat("mouse_y", 0.50f);
             for (int i = 0; i < FN; i++) {
@@ -283,6 +305,9 @@ public class PS3Mapper {
                 clickCount[i] = Math.max(1, Math.min(5,
                         sp.getInt("clicks_" + SKEY[i], 1)));
                 slotEnabled[i] = sp.getBoolean("enabled_" + SKEY[i], i < F_CUSTOM1);
+            }
+            for (int i = 0; i < hideGameButton.length; i++) {
+                hideGameButton[i] = sp.getBoolean("hide_game_button_" + i, false);
             }
         } catch (Throwable ignored) {
         }
@@ -296,6 +321,9 @@ public class PS3Mapper {
             e.putBoolean("bar_shown", barShown);
             e.putBoolean("mouse_mode", mouseMode);
             e.putBoolean("smart_mode", smartMode);
+            e.putBoolean("cursor_shown", cursorShown);
+            e.putInt("cursor_toggle_code", cursorToggleCode);
+            e.putInt("bar_toggle_code", barToggleCode);
             e.putFloat("mouse_x", mouseX);
             e.putFloat("mouse_y", mouseY);
             for (int i = 0; i < FN; i++) {
@@ -304,6 +332,9 @@ public class PS3Mapper {
                 e.putInt("key_" + SKEY[i], mappedKey[i]);
                 e.putInt("clicks_" + SKEY[i], clickCount[i]);
                 e.putBoolean("enabled_" + SKEY[i], slotEnabled[i]);
+            }
+            for (int i = 0; i < hideGameButton.length; i++) {
+                e.putBoolean("hide_game_button_" + i, hideGameButton[i]);
             }
             e.putBoolean("calibrated", true);
             e.commit();
@@ -907,9 +938,15 @@ public class PS3Mapper {
                 float dt = Math.min(0.050f, Math.max(0.001f,
                         (now - mouseFrameTime) / 1000f));
                 mouseFrameTime = now;
-                float x = mouseAxisX;
-                float y = mouseAxisY;
-                if (Math.abs(x) > 0.01f || Math.abs(y) > 0.01f) {
+                float x = Math.abs(scrollKeyX) > 0.01f ? scrollKeyX : mouseAxisX;
+                float y = Math.abs(scrollKeyY) > 0.01f ? scrollKeyY : mouseAxisY;
+                if (crossLong) {
+                    if ((Math.abs(x) > 0.20f || Math.abs(y) > 0.20f)
+                            && now - lastScrollAt >= 170L) {
+                        lastScrollAt = now;
+                        performMouseScroll(a, x, y);
+                    }
+                } else if (Math.abs(x) > 0.01f || Math.abs(y) > 0.01f) {
                     /* Acceleration gives fine aiming near centre and fast travel
                      * at full tilt, while remaining frame-rate independent. */
                     float sx = x * (0.30f + 0.75f * Math.abs(x));
@@ -929,6 +966,30 @@ public class PS3Mapper {
         float marginY = Math.max(0.025f, di(a, 22) / (float) Math.max(1, viewH(a)));
         mouseX = Math.max(marginX, Math.min(1f - marginX, mouseX));
         mouseY = Math.max(marginY, Math.min(1f - marginY, mouseY));
+    }
+
+    /** Long-CROSS scroll mode emits short repeated finger swipes. Stick/arrow
+     * direction follows content movement, so the synthetic finger moves opposite. */
+    private static void performMouseScroll(final Activity a, float x, float y) {
+        if (scrollBusy || a == null) return;
+        scrollBusy = true;
+        final int pid = MAX_POINTERS - 1;
+        final float sx = mouseX * viewW(a);
+        final float sy = mouseY * viewH(a);
+        final float ex = Math.max(di(a, 28), Math.min(viewW(a) - di(a, 28),
+                sx - x * di(a, 92)));
+        final float ey = Math.max(di(a, 28), Math.min(viewH(a) - di(a, 28),
+                sy - y * di(a, 92)));
+        ptrDown(a, pid, sx, sy);
+        handler().postDelayed(new Runnable() {
+            public void run() { ptrMove(a, pid, ex, ey); }
+        }, 45L);
+        handler().postDelayed(new Runnable() {
+            public void run() {
+                ptrUp(a, pid);
+                scrollBusy = false;
+            }
+        }, 120L);
     }
 
     private static void updateRightStick(Activity a) {
@@ -1042,13 +1103,45 @@ public class PS3Mapper {
         return code == KeyEvent.KEYCODE_BUTTON_THUMBR || code == KeyEvent.KEYCODE_BUTTON_12;
     }
 
-    private static boolean isMouseClickCode(int code) {
-        return code == KeyEvent.KEYCODE_BUTTON_A || code == KeyEvent.KEYCODE_BUTTON_1
-                || isR3Code(code);
+    private static boolean isCrossCode(int code) {
+        return code == KeyEvent.KEYCODE_BUTTON_A || code == KeyEvent.KEYCODE_BUTTON_1;
     }
 
-    /** L3+R3 recovers the bar; CROSS (X) and R3 click the mouse pointer. */
-    private static boolean handleSpecialButton(Activity a, int code, boolean down) {
+    private static void setCursorShown(Activity a, boolean shown) {
+        cursorShown = shown;
+        drawMouseCursor(a);
+        savePositions(a);
+        toast(a, shown ? "Mouse cursor visible" : "Mouse cursor hidden", Toast.LENGTH_SHORT);
+    }
+
+    private static void toggleBar(Activity a) {
+        barShown = !barShown;
+        applyBarVisibility(a);
+        savePositions(a);
+        toast(a, barShown ? "PS3 menu visible" : "PS3 menu hidden — L3+R3 to show",
+                Toast.LENGTH_LONG);
+    }
+
+    /** Assignable cursor/menu hotkeys plus permanent L3+R3 menu recovery. */
+    private static boolean handleSpecialButton(final Activity a, int code, boolean down) {
+        if (cursorToggleCode != KeyEvent.KEYCODE_UNKNOWN && code == cursorToggleCode) {
+            if (down && !cursorToggleHeld) setCursorShown(a, !cursorShown);
+            cursorToggleHeld = down;
+            return true;
+        }
+        if (barToggleCode != KeyEvent.KEYCODE_UNKNOWN && code == barToggleCode) {
+            if (down && !barToggleHeld) toggleBar(a);
+            barToggleHeld = down;
+            return true;
+        }
+        if (crossLong && isDpad(code)) {
+            float amount = down ? 1f : 0f;
+            if (code == KeyEvent.KEYCODE_DPAD_LEFT) scrollKeyX = -amount;
+            if (code == KeyEvent.KEYCODE_DPAD_RIGHT) scrollKeyX = amount;
+            if (code == KeyEvent.KEYCODE_DPAD_UP) scrollKeyY = -amount;
+            if (code == KeyEvent.KEYCODE_DPAD_DOWN) scrollKeyY = amount;
+            return true;
+        }
         if (isL3Code(code)) {
             chordL3 = down;
         }
@@ -1065,17 +1158,46 @@ public class PS3Mapper {
             chordFired = true;
             releaseFunc(a, F_L3);
             releaseFunc(a, F_R3);
-            barShown = !barShown;
-            applyBarVisibility(a);
-            savePositions(a);
-            toast(a, barShown ? "PS3 menu visible" : "PS3 menu hidden — L3+R3 to show",
-                    Toast.LENGTH_LONG);
+            toggleBar(a);
             return true;
         }
-        if (mouseMode && isMouseClickCode(code)) {
-            if (down) {
-                mouseClick(a);
+        if (mouseMode && isCrossCode(code)) {
+            if (down && !crossHeld) {
+                crossHeld = true;
+                crossLong = false;
+                handler().postDelayed(new Runnable() {
+                    public void run() {
+                        if (crossHeld && mouseMode) {
+                            crossLong = true;
+                            scrollKeyX = 0f;
+                            scrollKeyY = 0f;
+                            startMouseLoop(a);
+                            if (mouseCursor != null) {
+                                mouseCursor.setText("↕");
+                                mouseCursor.setTextColor(0xFFFFD54F);
+                            }
+                            toast(a, "SCROLL — use R-stick or arrows", Toast.LENGTH_SHORT);
+                        }
+                    }
+                }, 480L);
+            } else if (!down && crossHeld) {
+                boolean wasLong = crossLong;
+                crossHeld = false;
+                crossLong = false;
+                scrollKeyX = 0f;
+                scrollKeyY = 0f;
+                if (mouseCursor != null) {
+                    mouseCursor.setText("⊕");
+                    mouseCursor.setTextColor(Color.WHITE);
+                }
+                if (!wasLong) {
+                    mouseClick(a);
+                }
             }
+            return true;
+        }
+        if (mouseMode && isR3Code(code)) {
+            if (down) mouseClick(a);
             return true;
         }
         return false;
@@ -1137,6 +1259,20 @@ public class PS3Mapper {
             padSeen(a);
             updateStatus(KeyEvent.keyCodeToString(code), code);
             refreshChip(KeyEvent.keyCodeToString(code) + " " + code + (down ? " ↓" : " ↑"));
+
+            if (captureSpecial != 0) {
+                if (down) {
+                    if (captureSpecial == 1) cursorToggleCode = code;
+                    if (captureSpecial == 2) barToggleCode = code;
+                    String label = KeyEvent.keyCodeToString(code) + " (" + code + ")";
+                    if (specialCaptureView != null) specialCaptureView.setText(label);
+                    toast(a, (captureSpecial == 1 ? "Cursor toggle: " : "Menu toggle: ")
+                            + label, Toast.LENGTH_LONG);
+                    captureSpecial = 0;
+                    savePositions(a);
+                }
+                return true;
+            }
 
             /* While "CHANGE" is armed, the next physical button becomes this
              * screen target. Nothing is hardwired, including SELECT and D-pad. */
@@ -1298,6 +1434,7 @@ public class PS3Mapper {
             if (overlayRoot != null && overlayRoot.getParent() != null
                     && overlayRoot.getWindowToken() != null) {
                 overlayRoot.setVisibility(barShown ? View.VISIBLE : View.GONE);
+                drawGameButtonMasks(a);
                 drawMouseCursor(a);
                 refreshChip(null);
                 return;
@@ -1378,6 +1515,7 @@ public class PS3Mapper {
             overlayRoot = box;
             applyBarVisibility(a);
             drawButtonPreview(a);
+            drawGameButtonMasks(a);
             drawMouseCursor(a);
             refreshChip(null);
             Log.i(TAG, "badge installed over the game");
@@ -1398,13 +1536,123 @@ public class PS3Mapper {
         }
     }
 
+    /** Selectively covers the game's own fixed touch icons. PixelCopy samples a
+     * ring immediately around each icon and uses its average scene colour, so
+     * these are clean-screen masks rather than mapper target markers. */
+    private static void drawGameButtonMasks(final Activity a) {
+        if (a == null) return;
+        try {
+            for (int i = 0; i < gameButtonMasks.length; i++) {
+                View old = gameButtonMasks[i];
+                if (old != null && old.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) old.getParent()).removeView(old);
+                }
+                gameButtonMasks[i] = null;
+                if (!hideGameButton[i]) continue;
+                int f = MASK_FUNCS[i];
+                View mask = new View(a);
+                int w = di(a, i == 0 ? 138 : 58);
+                int h = di(a, i == 0 ? 70 : 58);
+                GradientDrawable bg = new GradientDrawable();
+                bg.setShape(GradientDrawable.OVAL);
+                bg.setColor(0xFF202020);
+                mask.setBackground(bg);
+                mask.setClickable(false);
+                mask.setFocusable(false);
+                mask.setZ(9998f);
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(w, h);
+                a.addContentView(mask, lp);
+                mask.setX(px[f] * viewW(a) - w / 2f);
+                mask.setY(py[f] * viewH(a) - h / 2f);
+                gameButtonMasks[i] = mask;
+            }
+            scheduleMaskRefresh(a);
+        } catch (Throwable t) {
+            Log.w(TAG, "game button masks failed", t);
+        }
+    }
+
+    private static boolean anyGameButtonHidden() {
+        for (int i = 0; i < hideGameButton.length; i++) if (hideGameButton[i]) return true;
+        return false;
+    }
+
+    private static void scheduleMaskRefresh(final Activity a) {
+        if (maskRefreshRunning || !anyGameButtonHidden() || Build.VERSION.SDK_INT < 26) return;
+        maskRefreshRunning = true;
+        handler().postDelayed(new Runnable() {
+            public void run() {
+                if (!anyGameButtonHidden() || activity == null || calibrating) {
+                    maskRefreshRunning = false;
+                    return;
+                }
+                final int w = Math.max(1, viewW(a));
+                final int h = Math.max(1, viewH(a));
+                final Bitmap shot = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                for (int i = 0; i < gameButtonMasks.length; i++) {
+                    if (gameButtonMasks[i] != null) gameButtonMasks[i].setVisibility(View.INVISIBLE);
+                }
+                try {
+                    PixelCopy.request(a.getWindow(), shot, new PixelCopy.OnPixelCopyFinishedListener() {
+                        public void onPixelCopyFinished(int result) {
+                            if (result == PixelCopy.SUCCESS) updateMaskColours(a, shot);
+                            for (int i = 0; i < gameButtonMasks.length; i++) {
+                                if (gameButtonMasks[i] != null) gameButtonMasks[i].setVisibility(View.VISIBLE);
+                            }
+                            shot.recycle();
+                            handler().postDelayed(thisRefresh(a), 900L);
+                        }
+                    }, handler());
+                } catch (Throwable t) {
+                    shot.recycle();
+                    maskRefreshRunning = false;
+                }
+            }
+        }, 500L);
+    }
+
+    private static Runnable thisRefresh(final Activity a) {
+        return new Runnable() {
+            public void run() {
+                maskRefreshRunning = false;
+                scheduleMaskRefresh(a);
+            }
+        };
+    }
+
+    private static void updateMaskColours(Activity a, Bitmap shot) {
+        for (int i = 0; i < gameButtonMasks.length; i++) {
+            View mask = gameButtonMasks[i];
+            if (mask == null) continue;
+            int f = MASK_FUNCS[i];
+            int cx = Math.max(0, Math.min(shot.getWidth() - 1, (int) (px[f] * shot.getWidth())));
+            int cy = Math.max(0, Math.min(shot.getHeight() - 1, (int) (py[f] * shot.getHeight())));
+            int radius = di(a, i == 0 ? 78 : 36);
+            long rr = 0, gg = 0, bb = 0, count = 0;
+            for (int n = 0; n < 32; n++) {
+                double angle = Math.PI * 2.0 * n / 32.0;
+                int x = Math.max(0, Math.min(shot.getWidth() - 1,
+                        cx + (int) (Math.cos(angle) * radius)));
+                int y = Math.max(0, Math.min(shot.getHeight() - 1,
+                        cy + (int) (Math.sin(angle) * radius)));
+                int c = shot.getPixel(x, y);
+                rr += Color.red(c); gg += Color.green(c); bb += Color.blue(c); count++;
+            }
+            int colour = Color.rgb((int) (rr / count), (int) (gg / count), (int) (bb / count));
+            GradientDrawable bg = new GradientDrawable();
+            bg.setShape(GradientDrawable.OVAL);
+            bg.setColor(colour);
+            mask.setBackground(bg);
+        }
+    }
+
     private static void drawMouseCursor(Activity a) {
         try {
             if (mouseCursor != null && mouseCursor.getParent() instanceof ViewGroup) {
                 ((ViewGroup) mouseCursor.getParent()).removeView(mouseCursor);
             }
             mouseCursor = null;
-            if (!mouseMode) {
+            if (!mouseMode || !cursorShown) {
                 return;
             }
             TextView cursor = new TextView(a);
@@ -1843,6 +2091,68 @@ public class PS3Mapper {
             });
             column.addView(mouseBtn);
 
+            final Button cursorBtn = mkButton(a, cursorShown
+                    ? "⊕ CURSOR VISIBLE — HIDE" : "⊕ CURSOR HIDDEN — SHOW", 10f);
+            cursorBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    setCursorShown(a, !cursorShown);
+                    cursorBtn.setText(cursorShown
+                            ? "⊕ CURSOR VISIBLE — HIDE" : "⊕ CURSOR HIDDEN — SHOW");
+                }
+            });
+            column.addView(cursorBtn);
+
+            final Button cursorKeyBtn = mkButton(a, "CHANGE CURSOR SHOW/HIDE BUTTON: "
+                    + (cursorToggleCode == KeyEvent.KEYCODE_UNKNOWN ? "NONE"
+                    : KeyEvent.keyCodeToString(cursorToggleCode)), 9f);
+            cursorKeyBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    captureSpecial = 1;
+                    specialCaptureView = cursorKeyBtn;
+                    cursorKeyBtn.setText("PRESS THE NEW CURSOR BUTTON NOW…");
+                }
+            });
+            column.addView(cursorKeyBtn);
+
+            final Button barKeyBtn = mkButton(a, "CHANGE MENU SHOW/HIDE BUTTON: "
+                    + (barToggleCode == KeyEvent.KEYCODE_UNKNOWN ? "NONE"
+                    : KeyEvent.keyCodeToString(barToggleCode)), 9f);
+            barKeyBtn.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    captureSpecial = 2;
+                    specialCaptureView = barKeyBtn;
+                    barKeyBtn.setText("PRESS THE NEW MENU BUTTON NOW…");
+                }
+            });
+            column.addView(barKeyBtn);
+
+            TextView scrollHelp = new TextView(a);
+            scrollHelp.setText("Mouse scroll: hold CROSS (X), then move the R-stick or D-pad arrows.");
+            scrollHelp.setTextColor(0xFFFFD54F);
+            scrollHelp.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f);
+            column.addView(scrollHelp);
+
+            TextView cleanTitle = new TextView(a);
+            cleanTitle.setText("── HIDE ORIGINAL GAME TOUCH BUTTONS ──\nChoose each game control separately; controller touches still work.");
+            cleanTitle.setTextColor(0xFF80DEEA);
+            cleanTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f);
+            column.addView(cleanTitle);
+            for (int mi = 0; mi < MASK_FUNCS.length; mi++) {
+                final int maskIndex = mi;
+                final Button maskBtn = mkButton(a, (hideGameButton[mi] ? "HIDDEN: " : "VISIBLE: ")
+                        + MASK_LABELS[mi], 9f);
+                maskBtn.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) {
+                        hideGameButton[maskIndex] = !hideGameButton[maskIndex];
+                        maskBtn.setText((hideGameButton[maskIndex] ? "HIDDEN: " : "VISIBLE: ")
+                                + MASK_LABELS[maskIndex]);
+                        savePositions(a);
+                        drawGameButtonMasks(a);
+                    }
+                });
+                column.addView(maskBtn);
+            }
+
             Button barBtn = mkButton(a, "✕ HIDE SMALL MENU BAR (L3+R3 TO SHOW)", 10f);
             barBtn.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
@@ -2068,6 +2378,8 @@ public class PS3Mapper {
         captureIndex = -1;
         captureKeyIndex = -1;
         captureKeyView = null;
+        captureSpecial = 0;
+        specialCaptureView = null;
         statusView = null;
         placer = null;
         for (int i = 0; i < FN; i++) {
@@ -2086,6 +2398,7 @@ public class PS3Mapper {
         if (a != null) {
             releaseAll(a);
             drawButtonPreview(a);
+            drawGameButtonMasks(a);
             drawMouseCursor(a);
             applyBarVisibility(a);
         }
