@@ -1,0 +1,69 @@
+name: Inspect ReMouse reference
+
+on:
+  push:
+    branches: ["arena/**"]
+    paths: [".github/workflows/remouse-reference.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      WORK: ${{ github.workspace }}/remousework
+      DRIVE_FILE_ID: 15xGrW7Oi13H9kyeLUmqTw2Ygw1KhbTFQ
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Download and decode reference
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK"
+          python3 -m pip install --quiet gdown
+          gdown "$DRIVE_FILE_ID" -O "$WORK/remouse.apk"
+          test "$(stat -c%s "$WORK/remouse.apk")" = 4418536
+          curl -fL --retry 3 -o "$WORK/apktool.jar" \
+            https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar
+          java -Xmx2g -jar "$WORK/apktool.jar" d -f -o "$WORK/tree" "$WORK/remouse.apk"
+          {
+            echo "== APK =="
+            sha256sum "$WORK/remouse.apk"
+            unzip -l "$WORK/remouse.apk" | grep -E 'classes.*dex|lib/'
+            echo "== MANIFEST =="
+            cat "$WORK/tree/AndroidManifest.xml"
+            echo "== DEX STRINGS =="
+            unzip -p "$WORK/remouse.apk" classes.dex | strings | \
+              grep -Ei 'mouse|cursor|pointer|joystick|gamepad|dispatchGesture|injectInput|velocity|speed|move' | sort -u | head -500 || true
+            echo "== MATCHING SMALI FILES =="
+            grep -RIlE 'dispatchGesture|injectInputEvent|SOURCE_MOUSE|TYPE_MOUSE|mouse|cursor|pointer|joystick|gamepad|velocity|KEYCODE_BUTTON' \
+              "$WORK/tree"/smali* 2>/dev/null | head -150 || true
+            echo "== RELEVANT INSTRUCTIONS =="
+            FILES=$(grep -RIlE 'dispatchGesture|injectInputEvent|SOURCE_MOUSE|TYPE_MOUSE|mouse|cursor|joystick|gamepad|velocity|KEYCODE_BUTTON' \
+              "$WORK/tree"/smali* 2>/dev/null | head -35 || true)
+            for f in $FILES; do
+              echo "--- $f"
+              grep -n -E -C 4 'dispatchGesture|injectInputEvent|SOURCE_MOUSE|TYPE_MOUSE|mouse|cursor|pointer|joystick|gamepad|velocity|KEYCODE_BUTTON|postDelayed|Runnable' "$f" | head -180 || true
+            done
+          } > "$WORK/report.txt" 2>&1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remouse-reference-report
+          path: ${{ env.WORK }}/report.txt
+      - name: Post report as commit comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY' > "$WORK/comment.md"
+          import os
+          p=os.path.join(os.environ['WORK'],'report.txt')
+          s=open(p,errors='replace').read()
+          if len(s)>50000: s=s[:25000]+'\n... truncated ...\n'+s[-25000:]
+          print('### ReMouse reference inspection\n\n```\n'+s+'\n```')
+          PY
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" -f body="$(cat "$WORK/comment.md")"
