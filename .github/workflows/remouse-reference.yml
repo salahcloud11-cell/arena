@@ -6,7 +6,7 @@ on:
     paths: [".github/workflows/remouse-reference.yml"]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   inspect:
