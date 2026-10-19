@@ -10,7 +10,8 @@
 - Icon: **Incredible Jack PS3v4**
 - Architectures: `armeabi-v7a` and `arm64-v8a`
 
-Uninstall the original or an earlier mod build before installing v4. Back up local game data first.
+The original store APK has a different signature and must be uninstalled first. v3 uses the same mod
+signing key, so install v4 over it when Android permits; otherwise back up local data before uninstalling.
 
 ## New v4 controls
 
