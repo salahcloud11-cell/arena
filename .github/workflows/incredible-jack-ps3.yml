@@ -150,6 +150,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -f incredible-jack-ps3pad/transfer
           git commit -m "transfer: Incredible Jack PS3 build ${GITHUB_SHA:0:8} [skip ci]"
+          git pull --rebase origin "$GITHUB_REF_NAME"
           git push
 
       - name: Upload build logs
