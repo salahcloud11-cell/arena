@@ -2,6 +2,15 @@
 
 A separate Android 7+ (`minSdk 24`) accessibility mapper. It does not modify games.
 
+## Download
+
+**[Download Universal-PS3-Mapper-v1.apk from Google Drive](https://drive.google.com/file/d/1OckuXRqb2guLeEEKnTAaTWpINLCmdinG/view)**
+
+- Size: **20,982 bytes**
+- SHA-256: `f8b3e2bcdeea425bed581257d09f77d40f472ce4b8af0403d132f7429ce858e2`
+- Package: `com.ps3mod.universal`
+- Version: `1.0`
+
 ## No-root mode
 
 1. Install and open **Universal PS3 Mapper**.
