@@ -30,7 +30,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 /**
- * DualShock 3 -> Incredible Jack (Cocos2d-x).
+ * DualShock 3 -> Incredible Jack (Cocos2d-x), v5 ad-free controller build.
  *
  * Assumption this file is built on: Incredible Jack is controlled through on-screen touch buttons.  It has no
  * gamepad API and no gamepad code path, so the only way to drive it is with the
