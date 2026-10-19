@@ -1,0 +1,37 @@
+name: Inspect Incredible Jack touch-control assets
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/jack-ui-inspect.yml']
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and inspect UI assets
+        run: |
+          set -euo pipefail
+          pip -q install gdown
+          gdown '1rjb0CeOME0zI5aI1P5IfTQWqo7DHZ1Fe' -O /tmp/jack.apk
+          sha256sum /tmp/jack.apk > /tmp/ui-report.txt
+          echo '=== Candidate archive files ===' >> /tmp/ui-report.txt
+          unzip -Z1 /tmp/jack.apk | grep -Ei '(button|control|arrow|jump|attack|fire|left|right|joystick|hud|dpad|move|touch|gui|gamepad|interface|ui).*(png|webp|jpg|plist|json|xml|atlas|fnt)$' >> /tmp/ui-report.txt || true
+          echo '=== All likely game image files ===' >> /tmp/ui-report.txt
+          unzip -Z1 /tmp/jack.apk | grep -Ei '^assets/.*\.(png|webp|jpg|plist|atlas)$' | head -4000 >> /tmp/ui-report.txt || true
+          mkdir -p /tmp/lib && cd /tmp/lib
+          unzip -q /tmp/jack.apk 'lib/armeabi-v7a/*'
+          echo '=== Native texture/string references ===' >> /tmp/ui-report.txt
+          strings lib/armeabi-v7a/*.so | grep -Ei '(button|control|arrow|jump|attack|fire|joystick|hud|dpad|touch|gui|gamepad|interface|ui).{0,100}(png|plist|atlas|jpg|webp)' | head -2000 >> /tmp/ui-report.txt || true
+      - name: Post report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, subprocess
+          text=pathlib.Path('/tmp/ui-report.txt').read_text(errors='replace')
+          for i in range(0,len(text),50000):
+              body='## Jack UI asset report\n```\n'+text[i:i+50000]+'\n```'
+              subprocess.run(['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}/commits/{os.environ["GITHUB_SHA"]}/comments','-f',f'body={body}'],check=True)
+          PY
