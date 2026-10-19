@@ -101,7 +101,7 @@ jobs:
             --java "$JAVA_HOME/bin/java" \
             --work "$WORK/patch" \
             --keydir "$WORK/keys" \
-            --out "$WORK/Incredible-Jack-PS3-v2.apk" \
+            --out "$WORK/Incredible-Jack-PS3-v3.apk" \
             2>&1 | tee "$WORK/logs/patch.log"
 
       - name: Publish release
@@ -109,7 +109,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          APK="$WORK/Incredible-Jack-PS3-v2.apk"
+          APK="$WORK/Incredible-Jack-PS3-v3.apk"
           HASH=$(sha256sum "$APK" | cut -d' ' -f1)
           cat > "$WORK/release.md" <<EOF
           Incredible Jack 1.36.6 with fully customizable DualShock 3 support.
@@ -117,7 +117,8 @@ jobs:
           - original Cocos2d-x activity remains the launcher
           - all PS3 buttons, both sticks, analog triggers and five extra buttons
           - invisible touch targets and fully hideable small menu bar (L3+R3 restores it)
-          - right-stick mouse with visible cursor and R3 click
+          - ReMouse-inspired continuous 60 Hz right-stick cursor with edge-safe bounds
+          - in mouse mode, CROSS (X) clicks at the cursor and suppresses its mapped target
           - Smart PlayStation Input accepts standard and raw BUTTON_1..12 layouts,
             HAT-axis D-pad, direct/polled events and analog-trigger hysteresis
           - PLACE, CHANGE and per-button 1x-5x multi-click Control Studio
@@ -129,10 +130,10 @@ jobs:
           if gh release view incredible-jack-ps3-latest >/dev/null 2>&1; then
             gh release upload incredible-jack-ps3-latest "$APK" "$APK.sha256" --clobber
             gh release edit incredible-jack-ps3-latest \
-              --title "Incredible Jack 1.36.6 + PS3 Controller v2" --notes-file "$WORK/release.md"
+              --title "Incredible Jack 1.36.6 + PS3 Controller v3" --notes-file "$WORK/release.md"
           else
             gh release create incredible-jack-ps3-latest --target "$GITHUB_SHA" \
-              --title "Incredible Jack 1.36.6 + PS3 Controller v2" \
+              --title "Incredible Jack 1.36.6 + PS3 Controller v3" \
               --notes-file "$WORK/release.md" "$APK" "$APK.sha256"
           fi
           gh release view incredible-jack-ps3-latest 2>&1 | tee "$WORK/logs/release.log"
@@ -141,8 +142,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p incredible-jack-ps3pad/transfer
-          cp "$WORK/Incredible-Jack-PS3-v2.apk" incredible-jack-ps3pad/transfer/
-          cp "$WORK/Incredible-Jack-PS3-v2.apk.sha256" incredible-jack-ps3pad/transfer/
+          cp "$WORK/Incredible-Jack-PS3-v3.apk" incredible-jack-ps3pad/transfer/
+          cp "$WORK/Incredible-Jack-PS3-v3.apk.sha256" incredible-jack-ps3pad/transfer/
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -f incredible-jack-ps3pad/transfer

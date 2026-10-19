@@ -48,7 +48,7 @@ import android.widget.Toast;
 public class PS3Mapper {
 
     private static final String TAG = "PS3Mapper";
-    private static final String VER = "Jack-v2";
+    private static final String VER = "Jack-v3";
 
     /* ------------------------------------------------------------------ */
     /* functions                                                          */
@@ -137,6 +137,9 @@ public class PS3Mapper {
     private static boolean mouseMode = true;
     private static boolean smartMode = true;
     private static float mouseX = 0.50f, mouseY = 0.50f;
+    private static volatile float mouseAxisX = 0f, mouseAxisY = 0f;
+    private static boolean mouseLoopRunning = false;
+    private static long mouseFrameTime = 0L;
     private static boolean chordL3 = false, chordR3 = false, chordFired = false;
     private static boolean hatUpHeld = false, hatDownHeld = false;
 
@@ -877,16 +880,55 @@ public class PS3Mapper {
         }
     }
 
+    /** ReMouse-style velocity loop: stick events set velocity, a 60 Hz loop keeps
+     * moving until Android sends the centred value. Movement no longer depends
+     * on the driver repeating identical MotionEvents. */
     private static void moveMouse(Activity a, float rawX, float rawY) {
-        float x = deadzone(rawX);
-        float y = deadzone(rawY);
-        if (Math.abs(x) < 0.01f && Math.abs(y) < 0.01f) {
+        mouseAxisX = deadzone(rawX);
+        mouseAxisY = deadzone(rawY);
+        startMouseLoop(a);
+    }
+
+    private static void startMouseLoop(final Activity a) {
+        if (mouseLoopRunning || a == null) {
             return;
         }
-        /* Relative cursor motion: fine near the centre, fast at full deflection. */
-        mouseX = clamp01(mouseX + x * (0.010f + 0.018f * Math.abs(x)));
-        mouseY = clamp01(mouseY + y * (0.010f + 0.018f * Math.abs(y)));
-        positionMouseCursor(a);
+        mouseLoopRunning = true;
+        mouseFrameTime = SystemClock.uptimeMillis();
+        handler().post(new Runnable() {
+            public void run() {
+                if (!mouseMode || activity == null) {
+                    mouseLoopRunning = false;
+                    mouseAxisX = 0f;
+                    mouseAxisY = 0f;
+                    return;
+                }
+                long now = SystemClock.uptimeMillis();
+                float dt = Math.min(0.050f, Math.max(0.001f,
+                        (now - mouseFrameTime) / 1000f));
+                mouseFrameTime = now;
+                float x = mouseAxisX;
+                float y = mouseAxisY;
+                if (Math.abs(x) > 0.01f || Math.abs(y) > 0.01f) {
+                    /* Acceleration gives fine aiming near centre and fast travel
+                     * at full tilt, while remaining frame-rate independent. */
+                    float sx = x * (0.30f + 0.75f * Math.abs(x));
+                    float sy = y * (0.30f + 0.75f * Math.abs(y));
+                    mouseX += sx * dt;
+                    mouseY += sy * dt;
+                    clampMouseToVisibleScreen(a);
+                    positionMouseCursor(a);
+                }
+                handler().postDelayed(this, 16L);
+            }
+        });
+    }
+
+    private static void clampMouseToVisibleScreen(Activity a) {
+        float marginX = Math.max(0.015f, di(a, 22) / (float) Math.max(1, viewW(a)));
+        float marginY = Math.max(0.025f, di(a, 22) / (float) Math.max(1, viewH(a)));
+        mouseX = Math.max(marginX, Math.min(1f - marginX, mouseX));
+        mouseY = Math.max(marginY, Math.min(1f - marginY, mouseY));
     }
 
     private static void updateRightStick(Activity a) {
@@ -1000,7 +1042,12 @@ public class PS3Mapper {
         return code == KeyEvent.KEYCODE_BUTTON_THUMBR || code == KeyEvent.KEYCODE_BUTTON_12;
     }
 
-    /** L3+R3 always recovers the hidden bar; R3 clicks the right-stick mouse. */
+    private static boolean isMouseClickCode(int code) {
+        return code == KeyEvent.KEYCODE_BUTTON_A || code == KeyEvent.KEYCODE_BUTTON_1
+                || isR3Code(code);
+    }
+
+    /** L3+R3 recovers the bar; CROSS (X) and R3 click the mouse pointer. */
     private static boolean handleSpecialButton(Activity a, int code, boolean down) {
         if (isL3Code(code)) {
             chordL3 = down;
@@ -1025,7 +1072,7 @@ public class PS3Mapper {
                     Toast.LENGTH_LONG);
             return true;
         }
-        if (mouseMode && isR3Code(code)) {
+        if (mouseMode && isMouseClickCode(code)) {
             if (down) {
                 mouseClick(a);
             }
@@ -1038,13 +1085,23 @@ public class PS3Mapper {
         if (a == null || calibrating) {
             return;
         }
+        clampMouseToVisibleScreen(a);
         final int pid = MAX_POINTERS - 1;
         ptrDown(a, pid, mouseX * viewW(a), mouseY * viewH(a));
+        if (mouseCursor != null) {
+            mouseCursor.setText("●");
+            mouseCursor.setTextColor(0xFF64FF91);
+        }
         handler().postDelayed(new Runnable() {
             public void run() {
                 ptrUp(a, pid);
+                if (mouseCursor != null) {
+                    mouseCursor.setText("⊕");
+                    mouseCursor.setTextColor(Color.WHITE);
+                    mouseCursor.bringToFront();
+                }
             }
-        }, 75L);
+        }, 85L);
     }
 
     /* ------------------------------------------------------------------ */
@@ -1253,6 +1310,7 @@ public class PS3Mapper {
             bg.setCornerRadius(di(a, 5));
             bg.setStroke(di(a, 1), 0xFF39FF6A);
             box.setBackground(bg);
+            box.setZ(10001f);
             box.setPadding(di(a, 6), di(a, 2), di(a, 6), di(a, 3));
 
             chipPads = chipLine(a, "PS3 " + VER + " · 🎮 …", 0xFF39FF6A, 9f);
@@ -1355,6 +1413,7 @@ public class PS3Mapper {
             cursor.setShadowLayer(4f, 1f, 1f, Color.BLACK);
             cursor.setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f);
             cursor.setGravity(Gravity.CENTER);
+            cursor.setZ(10000f);
             cursor.setClickable(false);
             cursor.setFocusable(false);
             a.addContentView(cursor, new FrameLayout.LayoutParams(
@@ -1374,8 +1433,15 @@ public class PS3Mapper {
             public void run() {
                 try {
                     if (mouseCursor != null) {
-                        mouseCursor.setX(mouseX * viewW(a) - mouseCursor.getWidth() / 2f);
-                        mouseCursor.setY(mouseY * viewH(a) - mouseCursor.getHeight() / 2f);
+                        clampMouseToVisibleScreen(a);
+                        int cw = mouseCursor.getWidth() > 0 ? mouseCursor.getWidth() : di(a, 42);
+                        int ch = mouseCursor.getHeight() > 0 ? mouseCursor.getHeight() : di(a, 42);
+                        mouseCursor.setX(mouseX * viewW(a) - cw / 2f);
+                        mouseCursor.setY(mouseY * viewH(a) - ch / 2f);
+                        mouseCursor.bringToFront();
+                        if (barShown && overlayRoot != null) {
+                            overlayRoot.bringToFront();
+                        }
                     }
                 } catch (Throwable ignored) {
                 }
@@ -1703,7 +1769,7 @@ public class PS3Mapper {
             TextView title = new TextView(a);
             title.setText("PS3 CONTROL STUDIO " + VER
                     + "\n📍 PLACE = touch position | CHANGE = pad key | 1×..5× = clicks"
-                    + "\nR-stick moves mouse · R3 clicks · L3+R3 shows/hides the small bar."
+                    + "\nR-stick moves mouse · CROSS (X) or R3 clicks · L3+R3 shows/hides the small bar."
                     + "\nTargets, bar, mouse and every mapping are saved.");
             title.setTextColor(Color.WHITE);
             title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
@@ -1759,13 +1825,13 @@ public class PS3Mapper {
             column.addView(smartBtn);
 
             final Button mouseBtn = mkButton(a, mouseMode
-                    ? "🖱 RIGHT STICK MOUSE: ON (R3 = CLICK)"
+                    ? "🖱 RIGHT STICK MOUSE: ON (X / R3 = CLICK)"
                     : "🖱 RIGHT STICK MOUSE: OFF", 10f);
             mouseBtn.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     mouseMode = !mouseMode;
                     mouseBtn.setText(mouseMode
-                            ? "🖱 RIGHT STICK MOUSE: ON (R3 = CLICK)"
+                            ? "🖱 RIGHT STICK MOUSE: ON (X / R3 = CLICK)"
                             : "🖱 RIGHT STICK MOUSE: OFF");
                     if (rightStickHeld) {
                         ptrUp(a, F_R_STICK);
