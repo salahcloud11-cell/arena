@@ -51,7 +51,7 @@ import android.widget.Toast;
 public class PS3Mapper {
 
     private static final String TAG = "PS3Mapper";
-    private static final String VER = "Jack-v4";
+    private static final String VER = "Jack-v5";
 
     /* ------------------------------------------------------------------ */
     /* functions                                                          */
@@ -584,6 +584,9 @@ public class PS3Mapper {
              * polled key-UP and leave LEFT held forever. */
             if (code == lastRealCode && down == lastRealDown
                     && SystemClock.uptimeMillis() - lastRealAt < 180L) {
+                return;
+            }
+            if (captureSpecialKey(a, code, down)) {
                 return;
             }
             if (calibrating) {
@@ -1229,6 +1232,27 @@ public class PS3Mapper {
     /* ------------------------------------------------------------------ */
     /* pad events                                                         */
     /* ------------------------------------------------------------------ */
+    /** Controller events do not reach the Activity while Control Studio's Dialog
+     * owns focus, so both the direct and polled input paths must complete these
+     * two special assignments. */
+    private static boolean captureSpecialKey(Activity a, int code, boolean down) {
+        if (captureSpecial == 0) return false;
+        if (down) {
+            int which = captureSpecial;
+            if (which == 1) cursorToggleCode = code;
+            if (which == 2) barToggleCode = code;
+            String label = KeyEvent.keyCodeToString(code) + " (" + code + ")";
+            if (specialCaptureView != null) {
+                specialCaptureView.setText((which == 1 ? "CURSOR: " : "MENU: ") + label);
+            }
+            toast(a, (which == 1 ? "Cursor toggle saved: " : "Menu toggle saved: ")
+                    + label, Toast.LENGTH_LONG);
+            captureSpecial = 0;
+            savePositions(a);
+        }
+        return true;
+    }
+
     public static boolean onKey(Activity a, KeyEvent ev) {
         if (a == null || ev == null) {
             return false;
@@ -1260,17 +1284,7 @@ public class PS3Mapper {
             updateStatus(KeyEvent.keyCodeToString(code), code);
             refreshChip(KeyEvent.keyCodeToString(code) + " " + code + (down ? " ↓" : " ↑"));
 
-            if (captureSpecial != 0) {
-                if (down) {
-                    if (captureSpecial == 1) cursorToggleCode = code;
-                    if (captureSpecial == 2) barToggleCode = code;
-                    String label = KeyEvent.keyCodeToString(code) + " (" + code + ")";
-                    if (specialCaptureView != null) specialCaptureView.setText(label);
-                    toast(a, (captureSpecial == 1 ? "Cursor toggle: " : "Menu toggle: ")
-                            + label, Toast.LENGTH_LONG);
-                    captureSpecial = 0;
-                    savePositions(a);
-                }
+            if (captureSpecialKey(a, code, down)) {
                 return true;
             }
 

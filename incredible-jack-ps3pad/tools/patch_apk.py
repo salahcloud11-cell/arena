@@ -130,7 +130,7 @@ def report_launcher(tree):
             # A literal activity label makes the home-screen build unmistakable.
             tag = m.group(0).split(">", 1)[0] + ">"
             new_tag = re.sub(r'android:label="[^"]*"',
-                             'android:label="Incredible Jack PS3v4"', tag, count=1)
+                             'android:label="Incredible Jack PS3v5"', tag, count=1)
             xml = xml.replace(tag, new_tag, 1)
             break
     if not launcher:
@@ -144,26 +144,49 @@ def report_launcher(tree):
     tag = am.group(0)
     if 'android:label=' in tag:
         new_tag = re.sub(r'android:label="[^"]*"',
-                         'android:label="Incredible Jack PS3v4"', tag, count=1)
+                         'android:label="Incredible Jack PS3v5"', tag, count=1)
     else:
-        new_tag = tag[:-1] + ' android:label="Incredible Jack PS3v4">'
+        new_tag = tag[:-1] + ' android:label="Incredible Jack PS3v5">'
     xml = xml[:am.start()] + new_tag + xml[am.end():]
     xml = re.sub(r'android:versionName="[^"]*"',
-                 'android:versionName="1.36.6-ps3v4"', xml, count=1)
+                 'android:versionName="1.36.6-ps3v5"', xml, count=1)
     # Android 11 + hidden InputManager reader compatibility, while minSdk remains 23.
     xml = re.sub(r'android:targetSdkVersion="[^"]*"',
                  'android:targetSdkVersion="28"', xml, count=1)
 
+    # Offline/no-ad build. Removing INTERNET is the hard guarantee: bundled ad
+    # SDK code cannot request or display network ads. Remove ad identifiers,
+    # attribution permissions and automatic ad lifecycle components as well.
+    ad_permissions = (
+        "android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_WIFI_STATE", "android.permission.ACCESS_COARSE_LOCATION",
+        "com.google.android.gms.permission.AD_ID",
+        "android.permission.ACCESS_ADSERVICES_ATTRIBUTION",
+        "android.permission.ACCESS_ADSERVICES_TOPICS",
+        "android.permission.ACCESS_ADSERVICES_AD_ID",
+        "com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE",
+    )
+    for permission in ad_permissions:
+        xml = re.sub(r'\s*<uses-permission\b[^>]*android:name="%s"[^>]*/>'
+                     % re.escape(permission), '', xml)
+    xml = re.sub(r'\s*<meta-data\b[^>]*android:name="com\.google\.android\.gms\.ads\.[^"]*"[^>]*/>',
+                 '', xml)
+    ad_packages = r'(?:com\.ironsource|com\.unity3d\.ironsourceads|com\.fyber|com\.applovin|com\.google\.android\.gms\.ads)'
+    xml = re.sub(r'\s*<(?:activity|service|receiver|provider)\b[^>]*android:name="'
+                 + ad_packages + r'\.[^"]*"[^>]*/>', '', xml)
+    xml = re.sub(r'\s*<activity\b[^>]*android:name="' + ad_packages
+                 + r'\.[^"]*"[^>]*>.*?</activity>', '', xml, flags=re.S)
+
     yml_path = os.path.join(tree, "apktool.yml")
     yml = open(yml_path, encoding="utf-8").read()
-    yml = re.sub(r"^(\s*versionName:\s*).*$", r"\g<1>1.36.6-ps3v4", yml,
+    yml = re.sub(r"^(\s*versionName:\s*).*$", r"\g<1>1.36.6-ps3v5", yml,
                  count=1, flags=re.M)
     yml = re.sub(r"^(\s*targetSdkVersion:\s*).*$", r"\g<1>'28'", yml,
                  count=1, flags=re.M)
     open(yml_path, "w", encoding="utf-8").write(yml)
     open(path, "w", encoding="utf-8").write(xml)
     log("    launcher: %s" % launcher)
-    log("    label: Incredible Jack PS3v4; versionName: 1.36.6-ps3v4; targetSdk: 28")
+    log("    label: Incredible Jack PS3v5; versionName: 1.36.6-ps3v5; targetSdk: 28")
     return launcher
 
 
@@ -482,11 +505,11 @@ def verify(apk_out, orig_apk, build_tools, tree=None):
             problems.append("package name changed in the rebuild")
         if "org.cocos2dx.incrediblejack.incrediblejack" not in badging:
             problems.append("the Cocos2d-x activity is not the launcher")
-        if "1.36.6-ps3v4" not in badging:
+        if "1.36.6-ps3v5" not in badging:
             problems.append("versionName was not set")
-        if "Incredible Jack PS3v4" not in badging:
+        if "Incredible Jack PS3v5" not in badging:
             problems.append("the launcher label does not carry the version")
-        if "application-label:'Incredible Jack PS3v4'" not in badging:
+        if "application-label:'Incredible Jack PS3v5'" not in badging:
             problems.append("the application label (home-screen name) does not carry the version")
         problems.extend(check_dex_classes(apk_out, build_tools))
     except SystemExit:
@@ -504,6 +527,12 @@ def verify(apk_out, orig_apk, build_tools, tree=None):
                 problems.append("expected exactly one LAUNCHER category")
             else:
                 log("    exactly one launcher activity")
+            if 'android.permission.INTERNET' in manifest:
+                problems.append("INTERNET permission remains; ad-free guarantee failed")
+            elif 'com.google.android.gms.ads.APPLICATION_ID' in manifest:
+                problems.append("Google ads application ID remains")
+            else:
+                log("    ad-free manifest: no INTERNET permission or Google ads ID")
         except Exception as exc:                 # noqa: BLE001
             problems.append("could not read the rebuilt manifest: %s" % exc)
 

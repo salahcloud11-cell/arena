@@ -28,9 +28,10 @@ public class MainActivity extends Activity {
         TextView help = new TextView(this);
         help.setText("Make controller buttons touch any game — without modifying that game.\n\n"
                 + "1. Enable the accessibility service below.\n"
-                + "2. Open a game. Tap the green MAPPER bar, then EDIT PROFILE.\n"
-                + "3. Add and drag targets. Tap a target, then press its PS3 button.\n"
-                + "4. Tap its × count to choose 1–5 clicks. Save and play.\n\n"
+                + "2. Open a game. Tap the green MAPPER bar, then EDIT.\n"
+                + "3. Press + TARGET, tap the exact game-button location, then press its PS3 button.\n"
+                + "4. Drag to adjust; long-press a target for 1–5 clicks; then SAVE / PLAY.\n"
+                + "5. MOUSE gives a no-root D-pad cursor; CROSS clicks. The ADB bridge upgrades it to the right stick.\n\n"
                 + "Profiles are stored separately for each game. Targets can be invisible. "
                 + "The optional ADB bridge adds global analog-stick cursor data on Android builds "
                 + "that do not expose joystick motion to accessibility services.");

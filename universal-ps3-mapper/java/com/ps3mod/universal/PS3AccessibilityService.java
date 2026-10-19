@@ -39,7 +39,8 @@ public class PS3AccessibilityService extends AccessibilityService {
     private View miniBar, editor, cursor;
     private String gamePackage = "default";
     private Target armed;
-    private boolean editorOpen, markersVisible = true, barHidden;
+    private boolean editorOpen, markersVisible = true, barHidden, placingTarget;
+    private boolean dpadMouse;
     private boolean l3, r3, chord;
     private float cursorX = .5f, cursorY = .5f, axisX, axisY;
     private boolean axisLoop;
@@ -74,6 +75,15 @@ public class PS3AccessibilityService extends AccessibilityService {
             return true;
         }
         if (ev.getRepeatCount() > 0) return true;
+        if (dpadMouse) {
+            if (code == KeyEvent.KEYCODE_DPAD_LEFT) { axisX = down ? -1f : 0f; showCursor(); startAxisLoop(); return true; }
+            if (code == KeyEvent.KEYCODE_DPAD_RIGHT) { axisX = down ? 1f : 0f; showCursor(); startAxisLoop(); return true; }
+            if (code == KeyEvent.KEYCODE_DPAD_UP) { axisY = down ? -1f : 0f; showCursor(); startAxisLoop(); return true; }
+            if (code == KeyEvent.KEYCODE_DPAD_DOWN) { axisY = down ? 1f : 0f; showCursor(); startAxisLoop(); return true; }
+            if (code == KeyEvent.KEYCODE_BUTTON_A || code == KeyEvent.KEYCODE_BUTTON_1) {
+                if (down) tap(cursorX, cursorY, 1); return true;
+            }
+        }
         for (Target t : targets) if (t.key == code) { if (down) tapTarget(t); return true; }
         /* In enhanced ADB mode CROSS clicks the right-stick cursor. */
         if (cursor != null && (code == KeyEvent.KEYCODE_BUTTON_A || code == KeyEvent.KEYCODE_BUTTON_1)) {
@@ -101,6 +111,7 @@ public class PS3AccessibilityService extends AccessibilityService {
         GradientDrawable bg=new GradientDrawable(); bg.setColor(0xDD102018); bg.setCornerRadius(dp(6)); bg.setStroke(dp(1),0xFF68F0A0); bar.setBackground(bg);
         TextView title=new TextView(this); title.setTag("title"); title.setTextColor(Color.WHITE); title.setTextSize(10); title.setGravity(Gravity.CENTER); bar.addView(title,new LinearLayout.LayoutParams(dp(155),dp(40)));
         Button edit=button("EDIT",10); edit.setOnClickListener(new View.OnClickListener(){public void onClick(View v){openEditor();}}); bar.addView(edit,new LinearLayout.LayoutParams(dp(65),dp(40)));
+        final Button mouse=button(dpadMouse?"MOUSE ON":"MOUSE",9); mouse.setOnClickListener(new View.OnClickListener(){public void onClick(View v){dpadMouse=!dpadMouse;mouse.setText(dpadMouse?"MOUSE ON":"MOUSE");if(dpadMouse)showCursor();else{axisX=axisY=0;remove(cursor);cursor=null;}}}); bar.addView(mouse,new LinearLayout.LayoutParams(dp(78),dp(40)));
         Button hide=button("HIDE",10); hide.setOnClickListener(new View.OnClickListener(){public void onClick(View v){barHidden=true; remove(miniBar); miniBar=null; Toast.makeText(PS3AccessibilityService.this,"L3+R3 restores Mapper",Toast.LENGTH_LONG).show();}}); bar.addView(hide,new LinearLayout.LayoutParams(dp(65),dp(40)));
         WindowManager.LayoutParams p=lp(WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN);
@@ -118,13 +129,19 @@ public class PS3AccessibilityService extends AccessibilityService {
     }
     private void rebuildEditor() {
         if (!editorOpen) return; remove(editor);
-        final FrameLayout root=new FrameLayout(this); root.setBackgroundColor(0x22000000);
+        final FrameLayout root=new FrameLayout(this); root.setBackgroundColor(0x22000000); root.setClickable(true);
+        root.setOnTouchListener(new View.OnTouchListener(){public boolean onTouch(View v,MotionEvent e){
+            if(placingTarget && e.getAction()==MotionEvent.ACTION_UP && e.getY()>dp(58)){
+                Target t=new Target();t.x=e.getX()/Math.max(1f,root.getWidth());t.y=e.getY()/Math.max(1f,root.getHeight());t.name="PRESS PS3 KEY";targets.add(t);armed=t;placingTarget=false;Toast.makeText(PS3AccessibilityService.this,"Now press the controller button",Toast.LENGTH_LONG).show();rebuildEditor();return true;
+            }return placingTarget;
+        }});
         LinearLayout tools=new LinearLayout(this); tools.setOrientation(LinearLayout.HORIZONTAL); tools.setBackgroundColor(0xEE102018); tools.setZ(100f);
-        Button add=button("+ TARGET",10); add.setOnClickListener(new View.OnClickListener(){public void onClick(View v){Target t=new Target(); t.x=.5f;t.y=.5f;t.name="PRESS KEY";targets.add(t);armed=t;rebuildEditor();}}); tools.addView(add,new LinearLayout.LayoutParams(0,dp(48),1));
+        Button add=button(placingTarget?"TAP SCREEN…":"+ TARGET",10); add.setOnClickListener(new View.OnClickListener(){public void onClick(View v){placingTarget=true;armed=null;Toast.makeText(PS3AccessibilityService.this,"Tap the exact game-button position",Toast.LENGTH_LONG).show();rebuildEditor();}}); tools.addView(add,new LinearLayout.LayoutParams(0,dp(48),1));
         Button visible=button(markersVisible?"TARGETS ON":"TARGETS OFF",9); visible.setOnClickListener(new View.OnClickListener(){public void onClick(View v){markersVisible=!markersVisible; rebuildEditor();}}); tools.addView(visible,new LinearLayout.LayoutParams(0,dp(48),1));
         Button delete=button("DELETE",9); delete.setOnClickListener(new View.OnClickListener(){public void onClick(View v){if(armed!=null){targets.remove(armed);armed=null;}else if(!targets.isEmpty())targets.remove(targets.size()-1);saveProfile();rebuildEditor();}}); tools.addView(delete,new LinearLayout.LayoutParams(0,dp(48),1));
         Button save=button("SAVE / PLAY",10); save.setOnClickListener(new View.OnClickListener(){public void onClick(View v){saveProfile();armed=null;editorOpen=false;remove(editor);editor=null;showMiniBar();}}); tools.addView(save,new LinearLayout.LayoutParams(0,dp(48),1));
         root.addView(tools,new FrameLayout.LayoutParams(-1,dp(48)));
+        TextView hint=new TextView(this);hint.setText(placingTarget?"TAP THE EXACT TOUCH BUTTON LOCATION":"Tap target = assign key · drag = move · long press = 1–5 clicks");hint.setTextColor(Color.WHITE);hint.setTextSize(11);hint.setGravity(Gravity.CENTER);hint.setBackgroundColor(0xCC263238);FrameLayout.LayoutParams hp=new FrameLayout.LayoutParams(-1,dp(34));hp.topMargin=dp(48);root.addView(hint,hp);
         for (int i=0;i<targets.size();i++) addTargetView(root,targets.get(i),i);
         WindowManager.LayoutParams p=lp(-1,-1,WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN); wm.addView(root,p); editor=root;
     }
