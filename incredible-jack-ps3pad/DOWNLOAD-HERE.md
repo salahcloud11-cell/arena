@@ -1,46 +1,33 @@
-# Incredible Jack 1.36.6 + PS3 Smart Controller v2
+# Incredible Jack 1.36.6 + PS3 Smart Controller v3
 
 ## Download
 
-**https://drive.google.com/file/d/1NGco3pUTxyDr3b2_QGK1iPN_tRh4_UCM/view**
+**[Download Incredible-Jack-PS3-v3.apk from Google Drive](https://drive.google.com/file/d/1ii7gzjXZJ39mif1U59PgmE5WBIp4gkux/view)**
 
-- Size: 88,671,546 bytes
-- SHA-256: `1252c7650ccfde4fa1fbec8fecf680f9dfb2c502ff801b545115e5dab7d2cc25`
-- Package: `com.chillingo.incrediblejack.android.rowgplay1`
-- Version: `1.36.6-ps3v2`
-- Icon: **Incredible Jack PS3v2**
-- ABIs: `armeabi-v7a`, `arm64-v8a`
+- Size: **88,671,546 bytes**
+- SHA-256: `17b42fe5684f31a2ee8a91edc69f43fd3e23391629a75f95756c73969d61a5d3`
+- Version: `1.36.6-ps3v3`
+- Icon: **Incredible Jack PS3v3**
+- Architectures: `armeabi-v7a` and `arm64-v8a`
 
-The mod uses a different signature. Uninstall the original or v1 before installing v2. Back up local
-save data first when possible.
+The mod uses a different signature. Uninstall the original, v1 or v2 before installing v3. Back up
+local game data first if it matters.
 
-## Hide the complete small menu bar
+## Corrected mouse controls
 
-Press **HIDE BAR** in the small menu or **HIDE SMALL MENU BAR** in Control Studio. The entire bar
-becomes `GONE`, not transparent, and the choice is saved.
+- The right stick moves the cursor continuously while held; movement no longer depends on repeated
+  controller events.
+- The cursor is clamped inside the visible screen and kept above the game surface.
+- While mouse mode is **ON**, press **CROSS (X)** to tap exactly at the cursor. X's separately mapped
+  game target is suppressed, so one press cannot trigger both actions.
+- R3 also clicks the cursor. **L3 + R3** still restores or hides the complete small menu bar.
+- Turn mouse mode **OFF** in Control Studio when you want CROSS (X) to use its normal mapped target.
 
-Press **L3 + R3 together** at any time to show or hide it again. This recovery shortcut works even
-when the bar and all touch targets are invisible.
+## Preserved features
 
-## Right-stick mouse
-
-- Move the cursor with the **right analog stick**.
-- Press **R3** to click at the cursor position.
-- Toggle `RIGHT STICK MOUSE` in the bar or Control Studio.
-- Cursor position and mouse mode are saved.
-- Smart axis detection supports both modern `RX/RY` and classic DS3 `Z/RZ` right-stick layouts.
-
-## Smart PlayStation Input
-
-Smart Input is enabled by default and can be toggled in Control Studio. It handles:
-
-- Standard Android A/B/X/Y, L1/R1/L2/R2, START/SELECT and L3/R3 events.
-- Raw PlayStation-driver `BUTTON_1` through `BUTTON_12` layouts.
-- D-pad key events and `HAT_X/HAT_Y` axis-only D-pads.
-- Direct activity events plus the independent InputManager reader, with exact-transition
-  de-duplication so releases are not lost.
-- Trigger range detection and hysteresis to prevent analog L2/R2 chatter.
-- Right-stick layout detection per connected device.
-
-All controls still use invisible synthetic touches on the game's own buttons. Every target remains
-placeable/remappable and supports 1x–5x multi-click. Five extra targets are available.
+- Smart Input supports normal Android gamepad codes, raw `BUTTON_1..12`, HAT-axis D-pad,
+  direct/polled events and analog-trigger hysteresis.
+- Control Studio can place, change and customize every PS3 control and the five extra buttons.
+- Each mapped control supports 1x-5x multi-click.
+- Touch-target markers can remain invisible, and mappings, mouse mode and bar visibility are saved.
+- Synthetic touches are delivered to the game's own Cocos2d-x activity.
