@@ -24,6 +24,14 @@ jobs:
           unzip -q /tmp/jack.apk 'lib/armeabi-v7a/*'
           echo '=== Native texture/string references ===' >> /tmp/ui-report.txt
           strings lib/armeabi-v7a/*.so | grep -Ei '(button|control|arrow|jump|attack|fire|joystick|hud|dpad|touch|gui|gamepad|interface|ui).{0,100}(png|plist|atlas|jpg|webp)' | head -2000 >> /tmp/ui-report.txt || true
+          echo '=== Candidate image metadata and base64 ===' >> /tmp/ui-report.txt
+          for f in assets/btn_a.png assets/btn_b.png assets/btn_c.png assets/btn_d.png assets/btn_l.png assets/btn_r.png assets/krug.png assets/krug_d.png assets/krug_e.png; do
+            echo "FILE $f" >> /tmp/ui-report.txt
+            unzip -p /tmp/jack.apk "$f" > /tmp/candidate.png
+            file /tmp/candidate.png >> /tmp/ui-report.txt
+            base64 -w0 /tmp/candidate.png >> /tmp/ui-report.txt
+            echo >> /tmp/ui-report.txt
+          done
       - name: Post report
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
