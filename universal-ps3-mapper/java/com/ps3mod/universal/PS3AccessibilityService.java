@@ -11,6 +11,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.view.Gravity;
+import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -19,6 +20,7 @@ import android.view.accessibility.AccessibilityEvent;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -38,9 +40,27 @@ public class PS3AccessibilityService extends AccessibilityService {
     private WindowManager wm;
     private View miniBar, editor, cursor;
     private String gamePackage = "default";
-    private Target armed;
+    private Target armed, placeExisting;
     private boolean editorOpen, markersVisible = true, barHidden, placingTarget;
     private boolean dpadMouse;
+    private volatile boolean capturePolling;
+    private Object inputManager;
+    private java.lang.reflect.Method getDeviceIds, getKeyCodeState;
+    private static final int[] CAPTURE_CODES = {
+            KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BUTTON_X,
+            KeyEvent.KEYCODE_BUTTON_Y, KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1,
+            KeyEvent.KEYCODE_BUTTON_L2, KeyEvent.KEYCODE_BUTTON_R2,
+            KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_SELECT,
+            KeyEvent.KEYCODE_BUTTON_THUMBL, KeyEvent.KEYCODE_BUTTON_THUMBR,
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_BUTTON_1, KeyEvent.KEYCODE_BUTTON_2,
+            KeyEvent.KEYCODE_BUTTON_3, KeyEvent.KEYCODE_BUTTON_4,
+            KeyEvent.KEYCODE_BUTTON_5, KeyEvent.KEYCODE_BUTTON_6,
+            KeyEvent.KEYCODE_BUTTON_7, KeyEvent.KEYCODE_BUTTON_8,
+            KeyEvent.KEYCODE_BUTTON_9, KeyEvent.KEYCODE_BUTTON_10,
+            KeyEvent.KEYCODE_BUTTON_11, KeyEvent.KEYCODE_BUTTON_12};
+    private final boolean[] captureStates = new boolean[CAPTURE_CODES.length];
     private boolean l3, r3, chord;
     private float cursorX = .5f, cursorY = .5f, axisX, axisY;
     private boolean axisLoop;
@@ -51,7 +71,7 @@ public class PS3AccessibilityService extends AccessibilityService {
 
     @Override public void onServiceConnected() {
         super.onServiceConnected(); wm = (WindowManager)getSystemService(WINDOW_SERVICE);
-        loadProfile(); showMiniBar(); startBridge();
+        loadProfile(); showMiniBar(); startBridge(); startCapturePolling();
         Toast.makeText(this,"Universal PS3 Mapper active",Toast.LENGTH_LONG).show();
     }
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
@@ -62,7 +82,7 @@ public class PS3AccessibilityService extends AccessibilityService {
         gamePackage = p; loadProfile(); updateBarTitle();
     }
     @Override public void onInterrupt() { }
-    @Override public void onDestroy() { remove(editor); remove(miniBar); remove(cursor); super.onDestroy(); }
+    @Override public void onDestroy() { capturePolling=false; remove(editor); remove(miniBar); remove(cursor); super.onDestroy(); }
 
     @Override protected boolean onKeyEvent(KeyEvent ev) {
         int code = ev.getKeyCode(); boolean down = ev.getAction() == KeyEvent.ACTION_DOWN;
@@ -71,7 +91,7 @@ public class PS3AccessibilityService extends AccessibilityService {
         if (l3 && r3 && !chord) { chord = true; barHidden = false; showMiniBar(); return true; }
         if (!l3 && !r3) chord = false;
         if (armed != null) {
-            if (down) { armed.key = code; armed.name = shortKey(code); armed = null; rebuildEditor(); saveProfile(); }
+            if (down) assignArmed(code);
             return true;
         }
         if (ev.getRepeatCount() > 0) return true;
@@ -95,6 +115,40 @@ public class PS3AccessibilityService extends AccessibilityService {
     private String shortKey(int code) {
         String s = KeyEvent.keyCodeToString(code).replace("KEYCODE_BUTTON_","").replace("KEYCODE_","");
         return s + " (" + code + ")";
+    }
+    private void assignArmed(int code) {
+        final Target t = armed;
+        if (t == null) return;
+        t.key = code; t.name = shortKey(code); armed = null; saveProfile();
+        Toast.makeText(this,"Saved " + t.name,Toast.LENGTH_LONG).show(); rebuildEditor();
+    }
+
+    /** Some Android gamepad drivers do not forward keys to AccessibilityService.
+     * This reader mirrors Incredible Jack's proven InputManager polling path and
+     * is used while CHANGE is armed, so customization works on those devices. */
+    private void startCapturePolling() {
+        if (capturePolling) return; capturePolling = true;
+        new Thread(new Runnable(){public void run(){
+            try {
+                Class<?> c=Class.forName("android.hardware.input.InputManager");
+                inputManager=c.getMethod("getInstance").invoke(null);
+                getDeviceIds=c.getMethod("getInputDeviceIds");
+                getKeyCodeState=c.getMethod("getKeyCodeState",int.class,int.class,int.class);
+            } catch(Throwable t){capturePolling=false;return;}
+            while(capturePolling){try{pollCaptureKeys();}catch(Throwable ignored){}
+                try{Thread.sleep(16L);}catch(InterruptedException e){return;}}
+        }},"PS3-Key-Capture").start();
+    }
+    private void pollCaptureKeys() throws Exception {
+        if (inputManager==null) return;
+        int[] ids=(int[])getDeviceIds.invoke(inputManager); if(ids==null)return;
+        boolean[] now=new boolean[CAPTURE_CODES.length];
+        for(int id:ids){InputDevice d=InputDevice.getDevice(id);if(d==null)continue;int src=d.getSources();
+            if((src&InputDevice.SOURCE_GAMEPAD)!=InputDevice.SOURCE_GAMEPAD&&(src&InputDevice.SOURCE_JOYSTICK)!=InputDevice.SOURCE_JOYSTICK)continue;
+            for(int i=0;i<CAPTURE_CODES.length;i++){try{int st=(Integer)getKeyCodeState.invoke(inputManager,id,0xffffff,CAPTURE_CODES[i]);if(st!=0)now[i]=true;}catch(Throwable ignored){}}
+        }
+        for(int i=0;i<CAPTURE_CODES.length;i++){if(now[i]==captureStates[i])continue;captureStates[i]=now[i];
+            if(now[i]&&armed!=null){final int code=CAPTURE_CODES[i];ui.post(new Runnable(){public void run(){assignArmed(code);}});return;}}
     }
     private int dp(int n) { return (int)(n * getResources().getDisplayMetrics().density + .5f); }
     private Button button(String s, int sp) { Button b=new Button(this); b.setText(s); b.setAllCaps(false); b.setTextSize(sp); return b; }
@@ -131,18 +185,22 @@ public class PS3AccessibilityService extends AccessibilityService {
         if (!editorOpen) return; remove(editor);
         final FrameLayout root=new FrameLayout(this); root.setBackgroundColor(0x22000000); root.setClickable(true);
         root.setOnTouchListener(new View.OnTouchListener(){public boolean onTouch(View v,MotionEvent e){
-            if(placingTarget && e.getAction()==MotionEvent.ACTION_UP && e.getY()>dp(58)){
-                Target t=new Target();t.x=e.getX()/Math.max(1f,root.getWidth());t.y=e.getY()/Math.max(1f,root.getHeight());t.name="PRESS PS3 KEY";targets.add(t);armed=t;placingTarget=false;Toast.makeText(PS3AccessibilityService.this,"Now press the controller button",Toast.LENGTH_LONG).show();rebuildEditor();return true;
+            if(placingTarget && e.getAction()==MotionEvent.ACTION_UP && e.getY()>dp(82)){
+                Target t=placeExisting;
+                if(t==null){t=new Target();t.name="PRESS PS3 KEY";targets.add(t);armed=t;}
+                t.x=e.getX()/Math.max(1f,root.getWidth());t.y=e.getY()/Math.max(1f,root.getHeight());
+                placeExisting=null;placingTarget=false;Toast.makeText(PS3AccessibilityService.this,armed==t?"Now press the controller button":"Position saved",Toast.LENGTH_LONG).show();saveProfile();rebuildEditor();return true;
             }return placingTarget;
         }});
         LinearLayout tools=new LinearLayout(this); tools.setOrientation(LinearLayout.HORIZONTAL); tools.setBackgroundColor(0xEE102018); tools.setZ(100f);
-        Button add=button(placingTarget?"TAP SCREEN…":"+ TARGET",10); add.setOnClickListener(new View.OnClickListener(){public void onClick(View v){placingTarget=true;armed=null;Toast.makeText(PS3AccessibilityService.this,"Tap the exact game-button position",Toast.LENGTH_LONG).show();rebuildEditor();}}); tools.addView(add,new LinearLayout.LayoutParams(0,dp(48),1));
+        Button add=button(placingTarget?"TAP SCREEN…":"+ TARGET",10); add.setOnClickListener(new View.OnClickListener(){public void onClick(View v){placingTarget=true;placeExisting=null;armed=null;Toast.makeText(PS3AccessibilityService.this,"Tap the exact game-button position",Toast.LENGTH_LONG).show();rebuildEditor();}}); tools.addView(add,new LinearLayout.LayoutParams(0,dp(48),1));
         Button visible=button(markersVisible?"TARGETS ON":"TARGETS OFF",9); visible.setOnClickListener(new View.OnClickListener(){public void onClick(View v){markersVisible=!markersVisible; rebuildEditor();}}); tools.addView(visible,new LinearLayout.LayoutParams(0,dp(48),1));
         Button delete=button("DELETE",9); delete.setOnClickListener(new View.OnClickListener(){public void onClick(View v){if(armed!=null){targets.remove(armed);armed=null;}else if(!targets.isEmpty())targets.remove(targets.size()-1);saveProfile();rebuildEditor();}}); tools.addView(delete,new LinearLayout.LayoutParams(0,dp(48),1));
         Button save=button("SAVE / PLAY",10); save.setOnClickListener(new View.OnClickListener(){public void onClick(View v){saveProfile();armed=null;editorOpen=false;remove(editor);editor=null;showMiniBar();}}); tools.addView(save,new LinearLayout.LayoutParams(0,dp(48),1));
         root.addView(tools,new FrameLayout.LayoutParams(-1,dp(48)));
         TextView hint=new TextView(this);hint.setText(placingTarget?"TAP THE EXACT TOUCH BUTTON LOCATION":"Tap target = assign key · drag = move · long press = 1–5 clicks");hint.setTextColor(Color.WHITE);hint.setTextSize(11);hint.setGravity(Gravity.CENTER);hint.setBackgroundColor(0xCC263238);FrameLayout.LayoutParams hp=new FrameLayout.LayoutParams(-1,dp(34));hp.topMargin=dp(48);root.addView(hint,hp);
         for (int i=0;i<targets.size();i++) addTargetView(root,targets.get(i),i);
+        addControlMenu(root);
         WindowManager.LayoutParams p=lp(-1,-1,WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN); wm.addView(root,p); editor=root;
     }
     private void addTargetView(FrameLayout root, final Target t, final int index) {
@@ -155,6 +213,26 @@ public class PS3AccessibilityService extends AccessibilityService {
             if(e.getAction()==MotionEvent.ACTION_MOVE){float dx=e.getRawX()-downX,dy=e.getRawY()-downY;if(Math.abs(dx)+Math.abs(dy)>dp(8)){v.setX(ox+dx);v.setY(oy+dy);t.x=(v.getX()+v.getWidth()/2f)/root.getWidth();t.y=(v.getY()+v.getHeight()/2f)/root.getHeight();return true;}}return false;}});
         FrameLayout.LayoutParams p=new FrameLayout.LayoutParams(dp(82),dp(82)); root.addView(b,p);
         b.setX(t.x*getResources().getDisplayMetrics().widthPixels-dp(41)); b.setY(t.y*getResources().getDisplayMetrics().heightPixels-dp(41));
+    }
+
+    /** Incredible-Jack-style explicit menu: every target has PLACE, CHANGE,
+     * multi-click and DELETE controls instead of relying on hidden gestures. */
+    private void addControlMenu(FrameLayout root) {
+        ScrollView scroll=new ScrollView(this);scroll.setBackgroundColor(0xF0111820);scroll.setZ(120f);
+        LinearLayout list=new LinearLayout(this);list.setOrientation(LinearLayout.VERTICAL);list.setPadding(dp(4),dp(4),dp(4),dp(12));
+        TextView title=new TextView(this);title.setText("CONTROL MENU\nPLACE · CHANGE · CLICKS");title.setTextColor(0xFF68F0A0);title.setGravity(Gravity.CENTER);title.setTextSize(12);list.addView(title,new LinearLayout.LayoutParams(-1,dp(50)));
+        for(int i=0;i<targets.size();i++){
+            final Target t=targets.get(i);
+            TextView name=new TextView(this);name.setText((i+1)+". "+t.name+"  @ "+Math.round(t.x*100)+","+Math.round(t.y*100));name.setTextColor(Color.WHITE);name.setTextSize(10);list.addView(name);
+            LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.HORIZONTAL);
+            Button place=button("PLACE",8);place.setOnClickListener(new View.OnClickListener(){public void onClick(View v){placeExisting=t;placingTarget=true;armed=null;Toast.makeText(PS3AccessibilityService.this,"Tap the new target position",Toast.LENGTH_LONG).show();rebuildEditor();}});row.addView(place,new LinearLayout.LayoutParams(0,dp(38),1));
+            Button change=button("CHANGE",8);change.setOnClickListener(new View.OnClickListener(){public void onClick(View v){armed=t;placingTarget=false;Toast.makeText(PS3AccessibilityService.this,"Press the new PS3 button now",Toast.LENGTH_LONG).show();rebuildEditor();}});row.addView(change,new LinearLayout.LayoutParams(0,dp(38),1));
+            Button clicks=button("×"+t.clicks,9);clicks.setOnClickListener(new View.OnClickListener(){public void onClick(View v){t.clicks=t.clicks%5+1;saveProfile();rebuildEditor();}});row.addView(clicks,new LinearLayout.LayoutParams(0,dp(38),.6f));
+            Button del=button("DEL",8);del.setOnClickListener(new View.OnClickListener(){public void onClick(View v){targets.remove(t);if(armed==t)armed=null;saveProfile();rebuildEditor();}});row.addView(del,new LinearLayout.LayoutParams(0,dp(38),.7f));
+            list.addView(row);
+        }
+        if(targets.isEmpty()){TextView empty=new TextView(this);empty.setText("Press + TARGET, then tap a game button.");empty.setTextColor(Color.WHITE);empty.setPadding(dp(8),dp(20),dp(8),dp(20));list.addView(empty);}
+        scroll.addView(list);FrameLayout.LayoutParams sp=new FrameLayout.LayoutParams(dp(285),-1,Gravity.RIGHT|Gravity.TOP);sp.topMargin=dp(82);root.addView(scroll,sp);
     }
 
     private void tapTarget(Target t) { tap(t.x,t.y,t.clicks); }
