@@ -1,46 +1,50 @@
-# Universal PS3 Mapper
+# Universal PS3 Mapper v3
 
 A separate Android 7+ (`minSdk 24`) accessibility mapper. It does not modify games.
 
 ## Download
 
-**[Download Universal-PS3-Mapper-v2.apk from Google Drive](https://drive.google.com/file/d/1fDzNNzPJHNFlycd0qrb-FmVXPMj62kLZ/view)**
+**[Download Universal-PS3-Mapper-v3.apk](https://drive.google.com/file/d/1xb1iNPLgKk8smCvrDS9R61v2wtSGZ7zH/view)**
 
 - Size: **25,078 bytes**
-- SHA-256: `285e97e49cb3b3fcf044bd563ca076c9d0a8accd86a0842940fee301014f7015`
+- SHA-256: `7bf71c46b158810d88f04eeae6c24317d798a3c5bd088a26ac199a1a5b20fe44`
 - Package: `com.ps3mod.universal`
-- Version: `2.0`
+- Version: `3.0`
 
-## No-root mode
+## Customization menu
 
-1. Install and open **Universal PS3 Mapper**.
-2. Enable its accessibility service.
-3. Open a game and tap the green **MAPPER / EDIT** bar.
-4. Add a target, drag it over a game control, tap it, and press the PS3 button to assign.
-5. Long-press a target to cycle 1–5 clicks. Profiles save per game package.
-6. **TARGETS OFF** makes editor markers faint; **SAVE / PLAY** removes all target overlays.
-7. L3+R3 always restores a hidden Mapper bar.
+v3 replaces the unclear gesture-only editor with an Incredible-Jack-style explicit control menu.
 
-Android accessibility services receive global hardware *keys*, but Android does not expose global
-joystick `MotionEvent` axes to ordinary background apps. Button and D-pad mappings therefore work
-without root; analog cursor input uses the optional bridge below.
+1. Install the APK and enable **Universal PS3 Mapper** in Accessibility settings.
+2. Open the game, then tap **EDIT** on the green Mapper bar.
+3. Press **+ TARGET** and tap the exact game-button location.
+4. Use the visible menu beside every target:
+   - **PLACE** — tap a new position.
+   - **CHANGE** — press the PS3 button you want to assign.
+   - **×1…×5** — choose the number of taps from one controller press.
+   - **DEL** — remove the target.
+5. Press **SAVE / PLAY**. Target overlays disappear during play.
+
+Button assignment now uses two readers: Accessibility key events and the same hidden InputManager
+polling method proven in Incredible Jack. This fixes controllers whose buttons were visible to Android
+but could not be captured while the editor overlay was open.
+
+The **MOUSE** switch enables a no-root D-pad cursor; CROSS clicks it. L3+R3 always restores a hidden
+Mapper bar. Profiles remain separate for each game package.
 
 ## Enhanced ADB analog mode
 
-Enable USB debugging, enable the mapper service, connect the phone, then run:
+Android does not expose global analog joystick MotionEvents to ordinary background applications.
+For a right-stick cursor, enable USB debugging and run while connected:
 
 ```bash
 python3 tools/ps3-adb-bridge.py
 ```
 
-The helper identifies the Linux gamepad event device, forwards normalized right-stick and button
-events over an ADB-local socket, and displays an edge-bounded right-stick cursor. CROSS clicks the
-cursor. Use `--device /dev/input/eventN` if automatic detection selects the wrong device.
-
-This mode needs ADB to remain connected while playing, but it does not require root. The protocol is
-also suitable for a future Shizuku process (`AXIS x y` and `KEY androidKeyCode 0|1` on local TCP 37654).
+The helper detects the gamepad event device, normalizes its right stick and forwards it to the mapper.
+Use `--device /dev/input/eventN` if automatic detection selects the wrong device.
 
 ## Security
 
-The bridge server binds only to `127.0.0.1`. Profiles remain in private application preferences.
-The service observes active package changes and controller key events; it does not upload content.
+The optional bridge binds only to `127.0.0.1`. Profiles remain in private application preferences.
+The service does not upload game content.
