@@ -1,33 +1,43 @@
-# COD:BOZ app-release — Full PS3 Controller v1
+# COD:BOZ — Customizable PS3 Controls v2
 
 ## Download
 
-**[Download COD-BOZ-app-release-PS3-v1.apk](https://drive.google.com/file/d/1Dh0-ShnlTgYCgawixococ4ErCtPLtCNh/view)**
+**[Download COD-BOZ-PS3-Custom-v2.apk](https://drive.google.com/file/d/1WYbDAsNqahqfDNA_hH3w6rSdCCz3UU2k/view)**
 
-- Source: Drive `app-release.apk`, package `com.activision.boz`
-- Source version: `1.0.8.1kotlin`
-- Mod version: `1.0.8.1kotlin-ps3v1`
-- Size: **43,904,178 bytes**
-- SHA-256: `d76b0cb8a704039c6994da74d171fb4de76ffdec560799822ffc60538113bbd8`
+- Package: `com.activision.boz`
+- Launcher: `com.activision.boz.Main`
+- Version: `1.0.8.1kotlin-ps3v2`
+- Size: **43,928,812 bytes**
+- SHA-256: `6700ce0f6d3516af9a63742b9e5acd1a7a3ae83b2494847feca11c73553ca0a1`
 - ABI: `armeabi-v7a` (32-bit)
+- Android target: API 28, compatible with the requested Android 11 device
 
-## Controller implementation
+## What changed from v1
 
-This build transplants the proven BOZ v8 Marmalade controller engine rather than using a generic
-key mapper. The launcher is still `com.activision.boz.Main`; guarded hooks call the controller
-before falling back to the original game.
+Version 1's fixed controller transplant did not move correctly on the user's controller and its
+camera was too fast. Version 2 replaces that fixed behavior with the visible, synthetic-touch
+Control Studio proven in the Incredible Jack build.
 
-- Left stick: analog movement
-- Right stick: smooth camera/look using DS3 Z/RZ with alternate-axis handling
-- D-pad: movement/navigation
-- Cross, Circle, Square and Triangle
-- L1/R1 and digital or analog L2/R2
-- Start, Select, L3 and R3
-- Native Marmalade key injection and synthetic touch where the game requires it
-- Controller events are consumed so one press does not also trigger an unrelated game action
+- Visible first-run setup; no controller key is required to open it
+- `PLACE` and `CHANGE` every PS3 button target
+- True two-dimensional left-stick movement using both X and Y axes
+- Right stick defaults to camera touch with a deliberately slow **40%** sensitivity
+- Saved camera sensitivity adjustment from **15% to 150%**
+- Optional right-stick mouse/cursor mode
+- Separate assignable D-pad directions, including HAT X/Y input
+- Multiple clicks per controller press
+- Hide individual target markers or the complete small menu bar
+- Assignable menu and cursor controls, with L3+R3 emergency menu recovery
+- Smart controller input handling and saved mappings
+- While mouse mode is active, Cross clicks at the cursor
+- Long-press Cross enables scrolling with the right stick or directional controls
 
-The workflow verified both shipped hooks after rebuilding, verified the APK signatures, and compared
-all original `assets/` and `lib/` entries byte-for-byte. All **37** packaged game assets/native
-library entries are preserved from the supplied APK.
+The mapper is injected directly into the unchanged launcher activity and emits the same synthetic
+touch events as fingers on COD's own controls. Hooks are guarded so the original game path remains
+available if the mapper declines or encounters an error.
 
-It is signed with the existing BOZ controller key (`bozpad`), matching the established BOZ mod line.
+## Integrity and signing
+
+CI compiled the mapper, injected and verified all key, motion, touch, and lifecycle hooks, then
+rebuilt and signed the APK with the established `bozpad` signing key. It also compared every
+original `assets/` and `lib/` entry byte-for-byte; all **37** game payload entries remain unchanged.
