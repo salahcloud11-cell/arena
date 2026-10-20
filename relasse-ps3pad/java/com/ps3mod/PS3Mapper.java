@@ -51,7 +51,7 @@ import android.widget.Toast;
 public class PS3Mapper {
 
     private static final String TAG = "PS3Mapper";
-    private static final String VER = "BOZ-Custom-v2";
+    private static final String VER = "BOZ-PlayStation-v3";
 
     /* ------------------------------------------------------------------ */
     /* functions                                                          */
@@ -119,8 +119,12 @@ public class PS3Mapper {
     private static long gestureDownTime = 0L;
 
     private static final long TAP_RELEASE_MS = 90L;
-    private static final float STICK_DEADZONE = 0.28f;
-    private static final float JOY_RADIUS = 0.075f;
+    /* PlayStation-like sticks: a modest centre deadzone, full analog range after it. */
+    private static final float STICK_DEADZONE = 0.20f;
+    /** Left-stick reach as a fraction of the short screen edge. Large enough to enter COD's run zone. */
+    private static final float DEFAULT_MOVE_RADIUS = 0.24f;
+    /** Maximum length of one camera swipe before transparently re-centring it. */
+    private static final float LOOK_SWIPE_RADIUS = 0.16f;
 
     private static Handler handler = null;
 
@@ -147,8 +151,10 @@ public class PS3Mapper {
     private static boolean barShown = true;
     private static boolean mouseMode = false;
     private static boolean smartMode = true;
-    /** COD camera speed multiplier. Default is deliberately slow for aiming. */
-    private static float lookSensitivity = 0.40f;
+    /** COD camera velocity multiplier. Continuous swipes make it behave like a console camera. */
+    private static float lookSensitivity = 0.55f;
+    /** Configurable left-stick reach; full tilt reaches COD's outer sprint/run ring. */
+    private static float moveRadius = DEFAULT_MOVE_RADIUS;
     private static boolean cursorShown = true;
     private static int cursorToggleCode = KeyEvent.KEYCODE_UNKNOWN;
     private static int barToggleCode = KeyEvent.KEYCODE_UNKNOWN;
@@ -169,8 +175,11 @@ public class PS3Mapper {
 
     private static boolean dLeft = false, dRight = false, dUp = false, dDown = false;
     private static float axisX = 0f, axisY = 0f;
-    private static float rightX = 0f, rightY = 0f;
-    private static boolean rightStickHeld = false, l2AxisHeld = false, r2AxisHeld = false;
+    private static volatile float rightX = 0f, rightY = 0f;
+    private static boolean rightStickHeld = false, rightLookLoopRunning = false;
+    private static float rightTouchX = 0f, rightTouchY = 0f;
+    private static long rightLookFrameTime = 0L;
+    private static boolean l2AxisHeld = false, r2AxisHeld = false;
     private static boolean leftHeld = false, rightHeld = false, joyHeld = false;
 
     private static long lastPadEvent = 0L;
@@ -299,7 +308,9 @@ public class PS3Mapper {
             mouseMode = sp.getBoolean("mouse_mode", false);
             smartMode = sp.getBoolean("smart_mode", true);
             lookSensitivity = Math.max(0.15f, Math.min(1.50f,
-                    sp.getFloat("look_sensitivity", 0.40f)));
+                    sp.getFloat("look_sensitivity", 0.55f)));
+            moveRadius = Math.max(0.12f, Math.min(0.35f,
+                    sp.getFloat("move_radius", DEFAULT_MOVE_RADIUS)));
             cursorShown = sp.getBoolean("cursor_shown", true);
             cursorToggleCode = sp.getInt("cursor_toggle_code", KeyEvent.KEYCODE_UNKNOWN);
             barToggleCode = sp.getInt("bar_toggle_code", KeyEvent.KEYCODE_UNKNOWN);
@@ -329,6 +340,7 @@ public class PS3Mapper {
             e.putBoolean("mouse_mode", mouseMode);
             e.putBoolean("smart_mode", smartMode);
             e.putFloat("look_sensitivity", lookSensitivity);
+            e.putFloat("move_radius", moveRadius);
             e.putBoolean("cursor_shown", cursorShown);
             e.putInt("cursor_toggle_code", cursorToggleCode);
             e.putInt("bar_toggle_code", barToggleCode);
@@ -768,6 +780,8 @@ public class PS3Mapper {
         rightHeld = false;
         joyHeld = false;
         rightStickHeld = false;
+        rightX = 0f;
+        rightY = 0f;
         l2AxisHeld = false;
         r2AxisHeld = false;
         hatUpHeld = false;
@@ -871,8 +885,11 @@ public class PS3Mapper {
         }
         float cx = fx(a, F_MOVE), cy = fy(a, F_MOVE);
         if (!joyHeld) { ptrDown(a, F_MOVE, cx, cy); joyHeld = true; }
-        ptrMove(a, F_MOVE, cx + x * JOY_RADIUS * viewW(a),
-                cy + y * JOY_RADIUS * viewH(a));
+        /* Use the short edge for a circular physical reach. The old per-axis 7.5%
+         * radius was only a few pixels vertically in landscape and never reached
+         * COD's outer run ring. Full tilt now reliably means full-speed sprint. */
+        float radiusPx = moveRadius * Math.min(viewW(a), viewH(a));
+        ptrMove(a, F_MOVE, cx + x * radiusPx, cy + y * radiusPx);
     }
 
     /** ReMouse-style velocity loop: stick events set velocity, a 60 Hz loop keeps
@@ -956,25 +973,71 @@ public class PS3Mapper {
         }, 120L);
     }
 
-    private static void updateRightStick(Activity a) {
-        float x = deadzone(rightX);
-        float y = deadzone(rightY);
-        float mag = Math.max(Math.abs(x), Math.abs(y));
-        if (mag < 0.06f) {
-            if (rightStickHeld) {
-                ptrUp(a, F_R_STICK);
-                rightStickHeld = false;
+    /**
+     * Console-style camera control. A mobile camera consumes relative finger movement,
+     * not a finger held at one displaced point. The old implementation sent one MOVE
+     * per Android stick report, producing a single 2D-like step. This 60 Hz loop emits
+     * continuous relative swipes for as long as the stick is held and periodically
+     * re-centres the synthetic finger before it reaches the screen edge.
+     */
+    private static void updateRightStick(final Activity a) {
+        if (rightLookLoopRunning || a == null) return;
+        rightLookLoopRunning = true;
+        rightLookFrameTime = SystemClock.uptimeMillis();
+        handler().post(new Runnable() {
+            public void run() {
+                if (mouseMode || activity == null) {
+                    if (rightStickHeld) ptrUp(a, F_R_STICK);
+                    rightStickHeld = false;
+                    rightLookLoopRunning = false;
+                    return;
+                }
+                float x = deadzone(rightX);
+                float y = deadzone(rightY);
+                if (Math.max(Math.abs(x), Math.abs(y)) < 0.02f) {
+                    if (rightStickHeld) ptrUp(a, F_R_STICK);
+                    rightStickHeld = false;
+                    rightLookLoopRunning = false;
+                    return;
+                }
+
+                long now = SystemClock.uptimeMillis();
+                float dt = Math.min(0.040f, Math.max(0.008f,
+                        (now - rightLookFrameTime) / 1000f));
+                rightLookFrameTime = now;
+                float cx = fx(a, F_R_STICK), cy = fy(a, F_R_STICK);
+                float shortEdge = Math.min(viewW(a), viewH(a));
+                float maxTravel = LOOK_SWIPE_RADIUS * shortEdge;
+
+                if (!rightStickHeld) {
+                    rightTouchX = cx;
+                    rightTouchY = cy;
+                    ptrDown(a, F_R_STICK, cx, cy);
+                    rightStickHeld = true;
+                }
+
+                /* 2.6 short edges/second at 100% gives a normal console maximum,
+                 * while the analog curve preserves precise aim close to centre. */
+                float curvedX = x * (0.38f + 0.62f * Math.abs(x));
+                float curvedY = y * (0.38f + 0.62f * Math.abs(y));
+                float speed = shortEdge * 2.60f * lookSensitivity;
+                float nx = rightTouchX + curvedX * speed * dt;
+                float ny = rightTouchY + curvedY * speed * dt;
+
+                if (Math.abs(nx - cx) > maxTravel || Math.abs(ny - cy) > maxTravel
+                        || nx < 8f || nx > viewW(a) - 8f || ny < 8f || ny > viewH(a) - 8f) {
+                    ptrUp(a, F_R_STICK);
+                    rightTouchX = cx;
+                    rightTouchY = cy;
+                    ptrDown(a, F_R_STICK, cx, cy);
+                } else {
+                    rightTouchX = nx;
+                    rightTouchY = ny;
+                    ptrMove(a, F_R_STICK, nx, ny);
+                }
+                handler().postDelayed(this, 16L);
             }
-            return;
-        }
-        float cx = fx(a, F_R_STICK);
-        float cy = fy(a, F_R_STICK);
-        if (!rightStickHeld) {
-            ptrDown(a, F_R_STICK, cx, cy);
-            rightStickHeld = true;
-        }
-        ptrMove(a, F_R_STICK, cx + x * JOY_RADIUS * lookSensitivity * viewW(a),
-                cy + y * JOY_RADIUS * lookSensitivity * viewH(a));
+        });
     }
 
     private static void axisButton(Activity a, int f, boolean down, boolean leftTrigger) {
@@ -1304,8 +1367,11 @@ public class PS3Mapper {
             /* Smart axis layout: newer drivers use RX/RY for the right stick;
              * classic DS3 drivers use Z/RZ. Inspect the device ranges instead of
              * hard-coding one vendor layout. */
+            /* Require a complete axis pair. Some Android DS3 drivers advertise one
+             * unused RX axis; treating that as a right stick caused one-dimensional
+             * camera movement. */
             boolean rightUsesRx = hasAxis(ev, MotionEvent.AXIS_RX)
-                    || hasAxis(ev, MotionEvent.AXIS_RY);
+                    && hasAxis(ev, MotionEvent.AXIS_RY);
             rightX = ev.getAxisValue(rightUsesRx ? MotionEvent.AXIS_RX : MotionEvent.AXIS_Z);
             rightY = ev.getAxisValue(rightUsesRx ? MotionEvent.AXIS_RY : MotionEvent.AXIS_RZ);
             if (mouseMode) {
@@ -2082,6 +2148,36 @@ public class PS3Mapper {
             sensitivityRow.addView(sensitivityUp,
                     new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             column.addView(sensitivityRow);
+
+            LinearLayout moveRow = new LinearLayout(a);
+            moveRow.setOrientation(LinearLayout.HORIZONTAL);
+            final Button moveDown = mkButton(a, "MOVE −", 10f);
+            final Button moveValue = mkButton(a,
+                    "L-STICK RUN REACH: " + Math.round(moveRadius * 100f) + "%", 9f);
+            final Button moveUp = mkButton(a, "MOVE +", 10f);
+            moveDown.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    moveRadius = Math.max(0.12f, moveRadius - 0.02f);
+                    moveValue.setText("L-STICK RUN REACH: "
+                            + Math.round(moveRadius * 100f) + "%");
+                    savePositions(a);
+                }
+            });
+            moveUp.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    moveRadius = Math.min(0.35f, moveRadius + 0.02f);
+                    moveValue.setText("L-STICK RUN REACH: "
+                            + Math.round(moveRadius * 100f) + "%");
+                    savePositions(a);
+                }
+            });
+            moveRow.addView(moveDown,
+                    new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            moveRow.addView(moveValue,
+                    new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 2f));
+            moveRow.addView(moveUp,
+                    new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            column.addView(moveRow);
 
             final Button mouseBtn = mkButton(a, mouseMode
                     ? "🖱 RIGHT STICK MOUSE: ON (X / R3 = CLICK)"

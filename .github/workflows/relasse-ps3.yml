@@ -1,4 +1,4 @@
-name: COD BOZ customizable PS3 controller
+name: COD BOZ PlayStation-style controller
 on:
   workflow_dispatch:
   push:
@@ -46,14 +46,14 @@ jobs:
           python3 - <<'PY'
           import pathlib,re,os
           w=pathlib.Path(os.environ['RUNNER_TEMP'])/'relasse';p=w/'tree/AndroidManifest.xml';s=p.read_text()
-          s=re.sub(r'(<application\b[^>]*android:label=")[^"]*',r'\1COD BOZ PS3 Custom v2',s,count=1)
+          s=re.sub(r'(<application\b[^>]*android:label=")[^"]*',r'\1COD BOZ PS3 PlayStation v3',s,count=1)
           m=re.search(r'<activity\b[^>]*android:name="com\.activision\.boz\.Main"[^>]*>',s)
           if not m:raise SystemExit('launcher tag missing')
-          tag=re.sub(r'android:label="[^"]*"','android:label="COD BOZ PS3 Custom v2"',m.group(0),count=1)
+          tag=re.sub(r'android:label="[^"]*"','android:label="COD BOZ PS3 PlayStation v3"',m.group(0),count=1)
           s=s[:m.start()]+tag+s[m.end():]
           s=re.sub(r'android:targetSdkVersion="[^"]*"','android:targetSdkVersion="28"',s,count=1)
           p.write_text(s)
-          y=w/'tree/apktool.yml';q=y.read_text();q=re.sub(r'^(\s*versionName:\s*).*$',r'\g<1>1.0.8.1kotlin-ps3v2',q,count=1,flags=re.M);q=re.sub(r'^(\s*targetSdkVersion:\s*).*$',r"\g<1>'28'",q,count=1,flags=re.M);y.write_text(q)
+          y=w/'tree/apktool.yml';q=y.read_text();q=re.sub(r'^(\s*versionName:\s*).*$',r'\g<1>1.0.8.1kotlin-ps3v3',q,count=1,flags=re.M);q=re.sub(r'^(\s*targetSdkVersion:\s*).*$',r"\g<1>'28'",q,count=1,flags=re.M);y.write_text(q)
           PY
           grep -q 'dispatchKeyEvent.*\(hooked\|added\)' "$W/hooks.txt"
           grep -q 'dispatchGenericMotionEvent.*\(hooked\|added\)' "$W/hooks.txt"
@@ -63,28 +63,28 @@ jobs:
       - name: Build sign and verify
         run: |
           set -euo pipefail
-          W="$RUNNER_TEMP/relasse"; BT="$ANDROID_HOME/build-tools/34.0.0"; APK="$W/COD-BOZ-PS3-Custom-v2.apk"
+          W="$RUNNER_TEMP/relasse"; BT="$ANDROID_HOME/build-tools/34.0.0"; APK="$W/COD-BOZ-PS3-PlayStation-v3.apk"
           java -Xmx3g -jar "$W/apktool.jar" b "$W/tree" -o "$W/unsigned.apk"
           "$BT/zipalign" -f -p 4 "$W/unsigned.apk" "$APK"
           "$BT/apksigner" sign --ks "$W/boz-v6.keystore" --ks-key-alias bozpad --ks-pass pass:bozpad2026 --key-pass pass:bozpad2026 --v1-signing-enabled true --v2-signing-enabled true "$APK"
           "$BT/apksigner" verify --verbose --print-certs "$APK" | tee "$W/verify.txt"
           "$BT/aapt" dump badging "$APK" | tee "$W/badging.txt"
           grep -q "package: name='com.activision.boz'" "$W/badging.txt"
-          grep -q "versionName='1.0.8.1kotlin-ps3v2'" "$W/badging.txt"
+          grep -q "versionName='1.0.8.1kotlin-ps3v3'" "$W/badging.txt"
           grep -q "launchable-activity: name='com.activision.boz.Main'" "$W/badging.txt"
           java -Xmx3g -jar "$W/apktool.jar" d -f -r -o "$W/check" "$APK" >/dev/null
           for hook in onKey onMotion onTouch onGameActivity; do grep -Rqs "Lcom/ps3mod/PS3Mapper;->$hook" "$W/check/smali"*; done
-          grep -Rqs 'BOZ-Custom-v2' "$W/check/smali"*
+          grep -Rqs 'BOZ-PlayStation-v3' "$W/check/smali"*
           python3 - <<'PY'
           import hashlib,zipfile,os
           w=os.path.join(os.environ['RUNNER_TEMP'],'relasse')
           def payload(path):
             with zipfile.ZipFile(path) as z:return {n:hashlib.sha256(z.read(n)).digest() for n in z.namelist() if n.startswith(('assets/','lib/')) and not n.endswith('/')}
-          a=payload(w+'/source.apk');b=payload(w+'/COD-BOZ-PS3-Custom-v2.apk')
+          a=payload(w+'/source.apk');b=payload(w+'/COD-BOZ-PS3-PlayStation-v3.apk')
           if a!=b:raise SystemExit('game assets/native libraries changed')
           print('verified immutable payload:',len(a),'files')
           PY
-          (cd "$W" && sha256sum COD-BOZ-PS3-Custom-v2.apk > COD-BOZ-PS3-Custom-v2.apk.sha256)
+          (cd "$W" && sha256sum COD-BOZ-PS3-PlayStation-v3.apk > COD-BOZ-PS3-PlayStation-v3.apk.sha256)
       - name: Publish release
         env: {GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
         run: |
@@ -94,20 +94,20 @@ jobs:
           COD:BOZ with the Incredible Jack Control Studio: visible first-run calibration,
           PLACE/CHANGE for every PS3 control, invisible targets, saved mappings, multi-click,
           Smart Input, assignable menu/cursor buttons, true 2D left-stick movement, optional
-          right-stick mouse and adjustable right-stick camera sensitivity (slow 40% default).
+          right-stick mouse and adjustable continuous right-stick camera, and a larger adjustable left-stick run reach.
           Original assets and armeabi-v7a native libraries remain byte-identical.
           EOF
           if gh release view relasse-ps3-latest >/dev/null 2>&1; then
-            gh release upload relasse-ps3-latest "$W/COD-BOZ-PS3-Custom-v2.apk" "$W/COD-BOZ-PS3-Custom-v2.apk.sha256" --clobber
-            gh release edit relasse-ps3-latest --title 'COD BOZ Incredible-Jack Controls v2' --notes-file "$W/notes.md"
+            gh release upload relasse-ps3-latest "$W/COD-BOZ-PS3-PlayStation-v3.apk" "$W/COD-BOZ-PS3-PlayStation-v3.apk.sha256" --clobber
+            gh release edit relasse-ps3-latest --title 'COD BOZ PlayStation Controls v3' --notes-file "$W/notes.md"
           else
-            gh release create relasse-ps3-latest --target "$GITHUB_SHA" --title 'COD BOZ Incredible-Jack Controls v2' --notes-file "$W/notes.md" "$W/COD-BOZ-PS3-Custom-v2.apk" "$W/COD-BOZ-PS3-Custom-v2.apk.sha256"
+            gh release create relasse-ps3-latest --target "$GITHUB_SHA" --title 'COD BOZ PlayStation Controls v3' --notes-file "$W/notes.md" "$W/COD-BOZ-PS3-PlayStation-v3.apk" "$W/COD-BOZ-PS3-PlayStation-v3.apk.sha256"
           fi
       - name: Transfer APK
         run: |
           set -euo pipefail
           W="$RUNNER_TEMP/relasse";mkdir -p relasse-ps3pad/transfer
-          cp "$W/COD-BOZ-PS3-Custom-v2.apk" "$W/COD-BOZ-PS3-Custom-v2.apk.sha256" relasse-ps3pad/transfer/
+          cp "$W/COD-BOZ-PS3-PlayStation-v3.apk" "$W/COD-BOZ-PS3-PlayStation-v3.apk.sha256" relasse-ps3pad/transfer/
           git config user.name 'github-actions[bot]';git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -f relasse-ps3pad/transfer;git commit -m "transfer: COD BOZ custom PS3 ${GITHUB_SHA:0:8} [skip ci]"
           git pull --rebase origin "$GITHUB_REF_NAME";git push
