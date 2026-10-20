@@ -1,0 +1,6 @@
+# Files downloaded from Google Drive by tools (game files - never commit)
+google_drive/
+# Python
+__pycache__/
+*.pyc
+.venv/
