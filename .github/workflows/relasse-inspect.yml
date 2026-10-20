@@ -44,8 +44,12 @@ jobs:
             grep -RIlE 'PS3|DualShock|full support|L3.*R3|SOURCE_GAMEPAD|AXIS_RZ' /tmp/relasse/v8/smali* 2>/dev/null | head -200 || true
             echo '=== V8 INPUT METHOD FILES ==='
             grep -RIlE 'dispatchGenericMotionEvent|dispatchKeyEvent' /tmp/relasse/v8/smali* 2>/dev/null | head -200 || true
-            echo '=== V8 MAIN / ISDEVICE HOOKS ==='
-            grep -n -B8 -A35 -E 'dispatchGenericMotionEvent|dispatchKeyEvent|PS3|onGamepad' /tmp/relasse/v8/smali/com/activision/boz/Main.smali /tmp/relasse/v8/smali/com/ideaworks3d/studio/IsDeviceActivity.smali 2>/dev/null || true
+            echo '=== V8 BOZPAD METHODS ==='
+            grep '^\.method' /tmp/relasse/v8/smali/com/bozpad/BozPad.smali || true
+            echo '=== V8 BOZM CLASS ==='
+            cat /tmp/relasse/v8/smali/com/activision/boz/BozM.smali || true
+            echo '=== V8 BOZPAD STRINGS / CONSTANTS ==='
+            grep -n -B4 -A8 -E 'PS3|DualShock|AXIS_|KEYCODE_|\.field.*static.*[XY]|\.field.*TX|\.field.*TY' /tmp/relasse/v8/smali/com/bozpad/BozPad.smali | head -1000 || true
           } >> /tmp/relasse/report.txt 2>&1
       - name: Post report
         env: {GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
