@@ -32,7 +32,18 @@ jobs:
             echo '=== MANIFEST ==='; cat /tmp/relasse/tree/AndroidManifest.xml
             echo '=== LAUNCHER / INPUT CANDIDATES ==='
             grep -RIlE 'dispatchKeyEvent|dispatchGenericMotionEvent|onCreate\(Landroid/os/Bundle|UnityPlayerActivity|Cocos2dxActivity' /tmp/relasse/tree/smali* 2>/dev/null | head -300 || true
+            echo '=== MAIN CLASS ==='; sed -n '1,260p' /tmp/relasse/tree/smali/com/activision/boz/Main.smali || true
             echo '=== NATIVE LIBRARIES ==='; find /tmp/relasse/tree/lib -type f -printf '%p %s\n' 2>/dev/null || true
+          } >> /tmp/relasse/report.txt 2>&1
+          gdown '1WLmwIOel76K6xFxY7e8eJUyQGtXoS3rQ' -O /tmp/relasse/v8.apk
+          java -Xmx3g -jar /tmp/relasse/apktool.jar d -f -r -o /tmp/relasse/v8 /tmp/relasse/v8.apk >/dev/null 2>&1
+          {
+            echo '=== V8 PS3 FILES ==='
+            find /tmp/relasse/v8/smali* -path '*/com/ps3mod/*' -type f -print
+            echo '=== V8 PS3 METHODS ==='
+            grep -R '^\.method' /tmp/relasse/v8/smali*/com/ps3mod 2>/dev/null || true
+            echo '=== V8 MAIN HOOKS ==='
+            grep -n -B5 -A20 'Lcom/ps3mod' /tmp/relasse/v8/smali/com/activision/boz/Main.smali 2>/dev/null || true
           } >> /tmp/relasse/report.txt 2>&1
       - name: Post report
         env: {GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
