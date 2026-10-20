@@ -1,43 +1,33 @@
-# COD:BOZ — Customizable PS3 Controls v2
+# COD:BOZ — PlayStation-style PS3 Controls v3
 
 ## Download
 
-**[Download COD-BOZ-PS3-Custom-v2.apk](https://drive.google.com/file/d/1WYbDAsNqahqfDNA_hH3w6rSdCCz3UU2k/view)**
+**[Download COD-BOZ-PS3-PlayStation-v3.apk](https://drive.google.com/file/d/1_evNEiMiexHQe0Zy2q_VYwdxrw1KYta9/view)**
 
 - Package: `com.activision.boz`
 - Launcher: `com.activision.boz.Main`
-- Version: `1.0.8.1kotlin-ps3v2`
-- Size: **43,928,812 bytes**
-- SHA-256: `6700ce0f6d3516af9a63742b9e5acd1a7a3ae83b2494847feca11c73553ca0a1`
+- Version: `1.0.8.1kotlin-ps3v3`
+- Size: **43,932,908 bytes**
+- SHA-256: `7364e9aabb0d582a26ba1379a442a9f14cb408c98dc7872c8c197a6c499d38b8`
 - ABI: `armeabi-v7a` (32-bit)
-- Android target: API 28, compatible with the requested Android 11 device
 
-## What changed from v1
+## PlayStation-style stick corrections
 
-Version 1's fixed controller transplant did not move correctly on the user's controller and its
-camera was too fast. Version 2 replaces that fixed behavior with the visible, synthetic-touch
-Control Studio proven in the Incredible Jack build.
+- The left stick now has a large circular reach based on the short screen edge rather than a tiny percentage of each axis.
+- Full left-stick tilt reaches COD's outer virtual-stick ring for full-speed running.
+- Left-stick run reach defaults to **24%** and is adjustable from **12%–35%** in Control Studio.
+- The right stick is now a continuous 60 Hz relative camera swipe, not one fixed touch displacement per Android event.
+- Holding the right stick keeps turning smoothly, as on a console, instead of moving the view only one step.
+- Camera swipes automatically recenter before reaching a screen edge.
+- A console-style analog curve gives fine aim near the center and fast turning at full tilt.
+- The right-axis detector requires a complete RX/RY pair, preventing one-dimensional movement from unused DS3 axes.
+- Camera sensitivity remains adjustable from **15%–150%**, with a balanced **55%** default for fresh installs.
 
-- Visible first-run setup; no controller key is required to open it
-- `PLACE` and `CHANGE` every PS3 button target
-- True two-dimensional left-stick movement using both X and Y axes
-- Right stick defaults to camera touch with a deliberately slow **40%** sensitivity
-- Saved camera sensitivity adjustment from **15% to 150%**
-- Optional right-stick mouse/cursor mode
-- Separate assignable D-pad directions, including HAT X/Y input
-- Multiple clicks per controller press
-- Hide individual target markers or the complete small menu bar
-- Assignable menu and cursor controls, with L3+R3 emergency menu recovery
-- Smart controller input handling and saved mappings
-- While mouse mode is active, Cross clicks at the cursor
-- Long-press Cross enables scrolling with the right stick or directional controls
+## Control Studio
 
-The mapper is injected directly into the unchanged launcher activity and emits the same synthetic
-touch events as fingers on COD's own controls. Hooks are guarded so the original game path remains
-available if the mapper declines or encounters an error.
+Every PS3 control remains customizable with visible first-run setup, `PLACE` and `CHANGE`, saved
+mappings, multi-click, optional mouse mode, hideable targets and menu bar, assignable menu/cursor
+buttons, and L3+R3 emergency menu recovery.
 
-## Integrity and signing
-
-CI compiled the mapper, injected and verified all key, motion, touch, and lifecycle hooks, then
-rebuilt and signed the APK with the established `bozpad` signing key. It also compared every
-original `assets/` and `lib/` entry byte-for-byte; all **37** game payload entries remain unchanged.
+CI verified the package, launcher, signing identity, mapper hooks, and byte-for-byte preservation of
+all **37** original `assets/` and `lib/` game payload entries.
