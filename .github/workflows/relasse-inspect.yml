@@ -1,0 +1,46 @@
+name: Inspect app-release controller target
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/relasse-inspect.yml']
+permissions: {contents: write}
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    permissions: {contents: write}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - name: Inspect APK
+        run: |
+          set -euo pipefail
+          pip -q install gdown
+          mkdir -p /tmp/relasse
+          gdown '1Xv-6dgu3RFSrpjkfPYGbdgvGvaczJwvy' -O /tmp/relasse/source.apk
+          curl -fL --retry 3 -o /tmp/relasse/apktool.jar https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar
+          {
+            stat /tmp/relasse/source.apk
+            sha256sum /tmp/relasse/source.apk
+            unzip -t /tmp/relasse/source.apk | tail -3
+            "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging /tmp/relasse/source.apk
+            echo '=== ENGINE / ABI ==='
+            unzip -Z1 /tmp/relasse/source.apk | grep -Ei '^(classes.*dex|lib/|assets/|.*unity|.*cocos|.*godot|.*flutter)' | head -1000 || true
+          } > /tmp/relasse/report.txt 2>&1
+          java -Xmx3g -jar /tmp/relasse/apktool.jar d -f -o /tmp/relasse/tree /tmp/relasse/source.apk >> /tmp/relasse/report.txt 2>&1
+          {
+            echo '=== MANIFEST ==='; cat /tmp/relasse/tree/AndroidManifest.xml
+            echo '=== LAUNCHER / INPUT CANDIDATES ==='
+            grep -RIlE 'dispatchKeyEvent|dispatchGenericMotionEvent|onCreate\(Landroid/os/Bundle|UnityPlayerActivity|Cocos2dxActivity' /tmp/relasse/tree/smali* 2>/dev/null | head -300 || true
+            echo '=== NATIVE LIBRARIES ==='; find /tmp/relasse/tree/lib -type f -printf '%p %s\n' 2>/dev/null || true
+          } >> /tmp/relasse/report.txt 2>&1
+      - name: Post report
+        env: {GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
+        run: |
+          python3 - <<'PY'
+          import os,pathlib,subprocess
+          s=pathlib.Path('/tmp/relasse/report.txt').read_text(errors='replace')
+          for i in range(0,len(s),50000):
+            b='## app-release inspection\n```\n'+s[i:i+50000]+'\n```'
+            subprocess.run(['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}/commits/{os.environ["GITHUB_SHA"]}/comments','-f',f'body={b}'],check=True)
+          PY
