@@ -55,10 +55,11 @@ jobs:
           p.write_text(s)
           y=w/'tree/apktool.yml';q=y.read_text();q=re.sub(r'^(\s*versionName:\s*).*$',r'\g<1>1.0.8.1kotlin-ps3v2',q,count=1,flags=re.M);q=re.sub(r'^(\s*targetSdkVersion:\s*).*$',r"\g<1>'28'",q,count=1,flags=re.M);y.write_text(q)
           PY
-          grep -q 'onKey.*hooked\|onKey.*added' "$W/hooks.txt"
-          grep -q 'onMotion.*hooked\|onMotion.*added' "$W/hooks.txt"
-          grep -q 'onTouch.*hooked\|onTouch.*added' "$W/hooks.txt"
-          grep -q 'onGameActivity.*hooked\|onGameActivity.*added' "$W/hooks.txt"
+          grep -q 'dispatchKeyEvent.*\(hooked\|added\)' "$W/hooks.txt"
+          grep -q 'dispatchGenericMotionEvent.*\(hooked\|added\)' "$W/hooks.txt"
+          grep -q 'dispatchTouchEvent.*\(hooked\|added\)' "$W/hooks.txt"
+          grep -q 'onCreate.*\(hooked\|added\)' "$W/hooks.txt"
+          grep -q 'onResume.*\(hooked\|added\)' "$W/hooks.txt"
       - name: Build sign and verify
         run: |
           set -euo pipefail
